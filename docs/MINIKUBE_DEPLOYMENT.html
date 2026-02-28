@@ -1,0 +1,1685 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Dokumentacja Wdrożenia Mikrousług Portfolio na Minikube</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; max-width: 900px; margin: 40px auto; padding: 0 20px; }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; border-bottom: 2px solid #95a5a6; padding-bottom: 8px; }
+        h3 { color: #7f8c8d; margin-top: 20px; }
+        code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; }
+        pre { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        pre code { background: transparent; color: #ecf0f1; }
+        li { margin: 5px 0; }
+        strong { color: #e74c3c; }
+        .success { color: #27ae60; }
+    </style>
+</head>
+<body>
+<h1>Dokumentacja Wdrożenia Mikrousług Portfolio na Minikube</h1>
+
+<strong>Data wdrożenia:</strong> 9 lutego 2026
+<strong>Środowisko:</strong> Minikube (lokalne)
+<strong>Platforma:</strong> Linux 6.14.0-37-generic
+<strong>Kubernetes:</strong> v1.35.0
+<strong>Minikube:</strong> v1.38.0
+
+---
+
+<h2>Spis Treści</h2>
+
+1. [Podsumowanie Wdrożenia](#podsumowanie-wdrożenia)
+2. [Architektura Systemu](#architektura-systemu)
+3. [Instalacja i Konfiguracja](#instalacja-i-konfiguracja)
+4. [Deployment Krok po Kroku](#deployment-krok-po-kroku)
+5. [Napotkane Problemy i Rozwiązania](#napotkane-problemy-i-rozwiązania)
+6. [Polecenia Administracyjne](#polecenia-administracyjne)
+7. [Weryfikacja i Testy](#weryfikacja-i-testy)
+
+---
+
+<h2>Podsumowanie Wdrożenia</h2>
+
+<h3>Wdrożone Komponenty</h3>
+
+<h4>Mikrousługi Laravel (5 serwisów):</h4>
+<li><strong>admin-app</strong> - Panel administracyjny (https://admin.portfolio.kube)</li>
+<li><strong>blog-app</strong> - Serwis blogowy</li>
+<li><strong>frontend-app</strong> - Aplikacja frontendowa (https://portfolio.kube)</li>
+<li><strong>sso-app</strong> - Single Sign-On (https://sso.portfolio.kube)</li>
+<li><strong>users-app</strong> - Zarządzanie użytkownikami</li>
+
+<h4>Workery:</h4>
+<li><strong>blog-consumer</strong> - Consumer RabbitMQ dla serwisu blogowego</li>
+
+<h4>Bazy Danych:</h4>
+<li><strong>MySQL</strong>: 4 instancje (admin-mysql, blog-mysql, sso-mysql, users-mysql)</li>
+<li><strong>Redis</strong>: 1 instancja (frontend-redis)</li>
+<li><strong>RabbitMQ</strong>: 1 instancja (messaging)</li>
+
+<h4>Infrastruktura:</h4>
+<li><strong>Ingress Controller</strong>: nginx-ingress</li>
+<li><strong>TLS</strong>: Self-signed certificates dla *.portfolio.kube</li>
+<li><strong>Namespace</strong>: portfolio</li>
+<li><strong>Domain</strong>: *.portfolio.kube (192.168.49.2)</li>
+
+<h3>Status Końcowy</h3>
+
+✅ Wszystkie pody działają poprawnie
+✅ Migracje baz danych wykonane
+✅ Ingress skonfigurowany z TLS
+✅ Komunikacja wewnętrzna między serwisami działa
+✅ Dostęp zewnętrzny przez HTTPS
+
+---
+
+<h2>Architektura Systemu</h2>
+
+<h3>Topologia Sieciowa</h3>
+
+<pre><code>
+┌─────────────────────────────────────────────────────────────────┐
+│                        EXTERNAL ACCESS                           │
+│                                                                   │
+│  Browser → https://portfolio.kube → Ingress (TLS termination)   │
+│         → https://admin.portfolio.kube                           │
+│         → https://sso.portfolio.kube                             │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    APPLICATION LAYER                             │
+│                                                                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
+│  │ Frontend │  │  Admin   │  │   Blog   │  │   SSO    │        │
+│  │   App    │  │   App    │  │   App    │  │   App    │        │
+│  │ (2 cont) │  │ (2 cont) │  │ (2 cont) │  │ (2 cont) │        │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘        │
+│       │             │              │             │               │
+│       │             │              │             │               │
+│  ┌────┴─────┐  ┌───┴──────┐  ┌───┴──────┐  ┌──┴───────┐       │
+│  │  Users   │  │   Blog   │  │          │  │          │       │
+│  │   App    │  │ Consumer │  │          │  │          │       │
+│  │ (2 cont) │  │ (1 cont) │  │          │  │          │       │
+│  └────┬─────┘  └────┬─────┘  │          │  │          │       │
+└───────┼─────────────┼─────────┼──────────┼──┼──────────┼───────┘
+        │             │         │          │  │          │
+┌───────┼─────────────┼─────────┼──────────┼──┼──────────┼───────┐
+│       │         DATA LAYER    │          │  │          │       │
+│       │             │         │          │  │          │       │
+│  ┌────▼─────┐  ┌───▼──────┐  │          │  │          │       │
+│  │  Users   │  │   Blog   │  │          │  │          │       │
+│  │  MySQL   │  │  MySQL   │  │          │  │          │       │
+│  │   (1)    │  │   (1)    │  │          │  │          │       │
+│  └──────────┘  └──────────┘  │          │  │          │       │
+│                               │          │  │          │       │
+│  ┌──────────┐  ┌──────────┐  │          │  │          │       │
+│  │  Admin   │  │   SSO    │  │          │  │          │       │
+│  │  MySQL   │  │  MySQL   │  │          │  │          │       │
+│  │   (1)    │  │   (1)    │  │          │  │          │       │
+│  └──────────┘  └──────────┘  │          │  │          │       │
+│                               │          │  │          │       │
+│  ┌──────────┐  ┌──────────┐  │          │  │          │       │
+│  │ Frontend │  │ RabbitMQ │  │          │  │          │       │
+│  │  Redis   │  │   (1)    │  │          │  │          │       │
+│  │   (1)    │  │          │  │          │  │          │       │
+│  └──────────┘  └──────────┘  │          │  │          │       │
+└───────────────────────────────┴──────────┴──┴──────────┴───────┘
+<pre><code>
+
+<h3>Wzorzec Komunikacji</h3>
+
+<h4>Zewnętrzna (HTTPS):</h4>
+<li>Browser → Ingress (TLS) → Services</li>
+
+<h4>Wewnętrzna (HTTP):</h4>
+<li>Frontend → http://blog (Kubernetes Service Discovery)</li>
+<li>Frontend → http://users</li>
+<li>Frontend → http://sso</li>
+
+<h4>Architektura Poda (PHP-FPM + Nginx):</h4>
+<pre><code>
+┌─────────────────────────────┐
+│         Pod                 │
+│  ┌─────────────────────┐   │
+│  │ InitContainer       │   │
+│  │ (copy public files) │   │
+│  └─────────────────────┘   │
+│  ┌─────────────────────┐   │
+│  │  PHP-FPM            │   │
+│  │  (port 9000)        │   │
+│  └─────────────────────┘   │
+│  ┌─────────────────────┐   │
+│  │  Nginx              │   │
+│  │  (port 80)          │   │
+│  └─────────────────────┘   │
+│  ┌─────────────────────┐   │
+│  │  Shared Volume      │   │
+│  │  /shared/public     │   │
+│  └─────────────────────┘   │
+└─────────────────────────────┘
+<pre><code>
+
+---
+
+<h2>Instalacja i Konfiguracja</h2>
+
+<h3>1. Instalacja kubectl</h3>
+
+<pre><code>
+<h1>Pobranie najnowszej wersji kubectl</h1>
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+
+<h1>Instalacja</h1>
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+<h1>Weryfikacja</h1>
+kubectl version --client
+<h1>Client Version: v1.35.0</h1>
+<h1>Kustomize Version: v5.7.1</h1>
+<pre><code>
+
+<h3>2. Instalacja Minikube</h3>
+
+<pre><code>
+<h1>Pobranie Minikube</h1>
+curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+
+<h1>Instalacja</h1>
+sudo install minikube-linux-amd64 /usr/local/bin/minikube
+
+<h1>Weryfikacja</h1>
+minikube version
+<h1>minikube version: v1.38.0</h1>
+<h1>commit: de81223c61ab1bd97dcfcfa6d9d5c59e5da4a0cf</h1>
+<pre><code>
+
+<h3>3. Uruchomienie Klastra Minikube</h3>
+
+<pre><code>
+<h1>Start klastra z konfiguracją produkcyjną</h1>
+minikube start \
+  --driver=docker \
+  --cpus=4 \
+  --memory=8192 \
+  --disk-size=40g \
+  --kubernetes-version=stable \
+  --addons=ingress \
+  --addons=metrics-server \
+  --addons=dashboard \
+  --profile=portfolio
+
+<h1>Weryfikacja klastra</h1>
+kubectl cluster-info
+<h1>Kubernetes control plane is running at https://192.168.49.2:8443</h1>
+
+kubectl get nodes
+<h1>NAME        STATUS   ROLES           AGE   VERSION</h1>
+<h1>portfolio   Ready    control-plane   Xh    v1.35.0</h1>
+<pre><code>
+
+<strong>Uzasadnienie zasobów:</strong>
+<li><strong>4 CPU</strong>: 5 aplikacji + 4 MySQL + Redis + RabbitMQ + system overhead</li>
+<li><strong>8GB RAM</strong>: Wymagane dla wszystkich podów + bufor</li>
+<li><strong>40GB disk</strong>: PVCs dla baz danych (22Gi) + obrazy Docker + bufor</li>
+
+<h3>4. Konfiguracja Bash Completion (opcjonalnie)</h3>
+
+<pre><code>
+<h1>Dodanie auto-completion dla kubectl</h1>
+echo 'source <(kubectl completion bash)' >> ~/.bashrc
+echo 'alias k=kubectl' >> ~/.bashrc
+echo 'complete -F __start_kubectl k' >> ~/.bashrc
+source ~/.bashrc
+<pre><code>
+
+---
+
+<h2>Deployment Krok po Kroku</h2>
+
+<h3>Krok 1: Generowanie Secrets</h3>
+
+<h4>1.1 Utworzenie skryptu generującego secrets</h4>
+
+Utworzono plik: <code>/home/decybell/dev/portfolio/scripts/generate-k8s-secrets.sh</code>
+
+<pre><code>
+#!/bin/bash
+set -e
+
+echo "Generating Kubernetes secrets..."
+
+SERVICES=("admin" "blog" "frontend" "sso" "users")
+USERS_API_KEY=$(openssl rand -base64 32)
+
+for SERVICE in "${SERVICES[@]}"; do
+    echo "Generating secret for ${SERVICE}..."
+
+    # Generuj APP_KEY używając Docker image
+    APP_KEY=$(docker run --rm ghcr.io/szymonborowski/microservices-${SERVICE}:v0.0.1 \
+        php artisan key:generate --show 2>/dev/null)
+
+    # Generuj hasła dla DB
+    DB_PASSWORD=$(openssl rand -base64 32)
+
+    # Kopiuj template i zastąp placeholdery
+    cp "${SERVICE}/k8s/secret.example.yaml" "${SERVICE}/k8s/secret.yaml"
+
+    # Zamień CHANGE_ME na prawdziwe wartości
+    sed -i "s|base64:CHANGE_ME_GENERATE_WITH_PHP_ARTISAN_KEY_GENERATE|${APP_KEY}|g" \
+        "${SERVICE}/k8s/secret.yaml"
+    sed -i "s|DB_PASSWORD: \"CHANGE_ME\"|DB_PASSWORD: \"${DB_PASSWORD}\"|g" \
+        "${SERVICE}/k8s/secret.yaml"
+
+    # Dla users dodaj USERS_API_KEY
+    if [ "${SERVICE}" = "users" ]; then
+        sed -i "s|USERS_API_KEY: \"CHANGE_ME\"|USERS_API_KEY: \"${USERS_API_KEY}\"|g" \
+            "${SERVICE}/k8s/secret.yaml"
+    fi
+
+    echo "✓ Secret generated for ${SERVICE}"
+done
+
+echo ""
+echo "All secrets generated!"
+echo "IMPORTANT: secret.yaml files are git-ignored. Keep them safe!"
+<pre><code>
+
+<h4>1.2 Wykonanie skryptu</h4>
+
+<pre><code>
+cd /home/decybell/dev/portfolio
+chmod +x scripts/generate-k8s-secrets.sh
+./scripts/generate-k8s-secrets.sh
+<pre><code>
+
+<strong>Wynik:</strong>
+<pre><code>
+✓ Secret generated for admin
+✓ Secret generated for blog
+✓ Secret generated for frontend
+✓ Secret generated for sso
+✓ Secret generated for users
+
+All secrets generated!
+<pre><code>
+
+<h4>1.3 Aktualizacja mysql.yaml z prawdziwymi hasłami</h4>
+
+<strong>Problem:</strong> Pliki <code>mysql.yaml</code> zawierały Secret definitions z placeholderami "CHANGE_ME", które nadpisywały poprawnie wygenerowane secrets przy każdym <code>kubectl apply</code>.
+
+<strong>Rozwiązanie:</strong> Aktualizacja mysql.yaml z prawdziwymi hasłami z secrets:
+
+<pre><code>
+cd /home/decybell/dev/portfolio
+SERVICES=("admin" "blog" "sso" "users")
+
+for SERVICE in "${SERVICES[@]}"; do
+    # Pobierz hasło z secret
+    DB_PASS=$(kubectl get secret ${SERVICE}-secret -n portfolio \
+        -o jsonpath='{.data.DB_PASSWORD}' | base64 -d)
+
+    # Zamień CHANGE_ME w mysql.yaml
+    sed -i "s/MYSQL_PASSWORD: \"CHANGE_ME\"/MYSQL_PASSWORD: \"${DB_PASS}\"/g" \
+        ${SERVICE}/k8s/mysql.yaml
+    sed -i "s/MYSQL_ROOT_PASSWORD: \"CHANGE_ME\"/MYSQL_ROOT_PASSWORD: \"${DB_PASS}\"/g" \
+        ${SERVICE}/k8s/mysql.yaml
+
+    echo "✓ ${SERVICE}/k8s/mysql.yaml updated"
+done
+<pre><code>
+
+<h3>Krok 2: Generowanie TLS Certificates</h3>
+
+<pre><code>
+cd /home/decybell/dev/portfolio
+
+<h1>Frontend (portfolio.kube)</h1>
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout frontend-tls.key \
+  -out frontend-tls.crt \
+  -subj "/CN=portfolio.kube/O=Portfolio Local"
+
+kubectl create secret tls frontend-tls \
+  --namespace=portfolio \
+  --key=frontend-tls.key \
+  --cert=frontend-tls.crt
+
+<h1>Admin (admin.portfolio.kube)</h1>
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout admin-tls.key \
+  -out admin-tls.crt \
+  -subj "/CN=admin.portfolio.kube/O=Portfolio Local"
+
+kubectl create secret tls admin-tls \
+  --namespace=portfolio \
+  --key=admin-tls.key \
+  --cert=admin-tls.crt
+
+<h1>SSO (sso.portfolio.kube)</h1>
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout sso-tls.key \
+  -out sso-tls.crt \
+  -subj "/CN=sso.portfolio.kube/O=Portfolio Local"
+
+kubectl create secret tls sso-tls \
+  --namespace=portfolio \
+  --key=sso-tls.key \
+  --cert=sso-tls.crt
+
+<h1>Usuń tymczasowe pliki</h1>
+rm -f *-tls.key *-tls.crt
+<pre><code>
+
+<h3>Krok 3: Konfiguracja DNS (/etc/hosts)</h3>
+
+<pre><code>
+<h1>Pobierz IP Minikube</h1>
+MINIKUBE_IP=$(minikube ip --profile=portfolio)
+echo "Minikube IP: ${MINIKUBE_IP}"
+<h1>Output: 192.168.49.2</h1>
+
+<h1>Dodaj wpisy do /etc/hosts</h1>
+echo "${MINIKUBE_IP} admin.portfolio.kube" | sudo tee -a /etc/hosts
+echo "${MINIKUBE_IP} portfolio.kube" | sudo tee -a /etc/hosts
+echo "${MINIKUBE_IP} sso.portfolio.kube" | sudo tee -a /etc/hosts
+
+<h1>Weryfikacja</h1>
+cat /etc/hosts | grep portfolio.kube
+<pre><code>
+
+<h3>Krok 4: Załadowanie Docker Images do Minikube</h3>
+
+<strong>Uwaga:</strong> Obrazy były już zbudowane lokalnie (ghcr.io/szymonborowski/microservices-*:v0.0.1)
+
+<pre><code>
+cd /home/decybell/dev/portfolio
+
+<h1>Załaduj wszystkie obrazy do Minikube</h1>
+minikube image load ghcr.io/szymonborowski/microservices-admin:v0.0.1 --profile=portfolio
+minikube image load ghcr.io/szymonborowski/microservices-blog:v0.0.1 --profile=portfolio
+minikube image load ghcr.io/szymonborowski/microservices-frontend:v0.0.1 --profile=portfolio
+minikube image load ghcr.io/szymonborowski/microservices-sso:v0.0.1 --profile=portfolio
+minikube image load ghcr.io/szymonborowski/microservices-users:v0.0.1 --profile=portfolio
+
+<h1>Weryfikacja</h1>
+minikube image ls --profile=portfolio | grep microservices
+<pre><code>
+
+<h3>Krok 5: Deployment Namespace</h3>
+
+<pre><code>
+kubectl apply -f infra/k8s/namespace.yaml
+<pre><code>
+
+<strong>Wynik:</strong>
+<pre><code>
+namespace/portfolio created
+<pre><code>
+
+<h3>Krok 6: Deployment Secrets</h3>
+
+<pre><code>
+kubectl apply -f admin/k8s/secret.yaml
+kubectl apply -f blog/k8s/secret.yaml
+kubectl apply -f frontend/k8s/secret.yaml
+kubectl apply -f sso/k8s/secret.yaml
+kubectl apply -f users/k8s/secret.yaml
+<pre><code>
+
+<strong>Wynik:</strong>
+<pre><code>
+secret/admin-secret created
+secret/blog-secret created
+secret/frontend-secret created
+secret/sso-secret created
+secret/users-secret created
+<pre><code>
+
+<h3>Krok 7: Deployment Baz Danych</h3>
+
+<pre><code>
+<h1>Deploy StatefulSets dla MySQL</h1>
+kubectl apply -f admin/k8s/mysql.yaml
+kubectl apply -f blog/k8s/mysql.yaml
+kubectl apply -f sso/k8s/mysql.yaml
+kubectl apply -f users/k8s/mysql.yaml
+
+<h1>Deploy Redis</h1>
+kubectl apply -f frontend/k8s/redis.yaml
+
+<h1>Deploy RabbitMQ</h1>
+kubectl apply -f infra/k8s/rabbitmq.yaml
+
+<h1>Czekaj aż bazy będą gotowe</h1>
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=admin-mysql \
+  -n portfolio --timeout=300s
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=blog-mysql \
+  -n portfolio --timeout=300s
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=sso-mysql \
+  -n portfolio --timeout=300s
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=users-mysql \
+  -n portfolio --timeout=300s
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=frontend-redis \
+  -n portfolio --timeout=300s
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=rabbitmq \
+  -n portfolio --timeout=300s
+<pre><code>
+
+<strong>Wynik:</strong>
+<pre><code>
+statefulset.apps/admin-mysql created
+statefulset.apps/blog-mysql created
+statefulset.apps/sso-mysql created
+statefulset.apps/users-mysql created
+statefulset.apps/frontend-redis created
+statefulset.apps/rabbitmq created
+
+pod/admin-mysql-0 condition met
+pod/blog-mysql-0 condition met
+pod/sso-mysql-0 condition met
+pod/users-mysql-0 condition met
+pod/frontend-redis-0 condition met
+pod/rabbitmq-0 condition met
+<pre><code>
+
+<h3>Krok 8: Deployment ConfigMaps</h3>
+
+<pre><code>
+kubectl apply -f admin/k8s/configmap.yaml
+kubectl apply -f blog/k8s/configmap.yaml
+kubectl apply -f frontend/k8s/configmap.yaml
+kubectl apply -f sso/k8s/configmap.yaml
+kubectl apply -f users/k8s/configmap.yaml
+<pre><code>
+
+<strong>Wynik:</strong>
+<pre><code>
+configmap/admin-config created
+configmap/blog-config created
+configmap/frontend-config created
+configmap/sso-config created
+configmap/users-config created
+<pre><code>
+
+<h3>Krok 9: Deployment Aplikacji</h3>
+
+<pre><code>
+<h1>Deploy Deployments</h1>
+kubectl apply -f admin/k8s/deployment.yaml
+kubectl apply -f blog/k8s/deployment.yaml
+kubectl apply -f frontend/k8s/deployment.yaml
+kubectl apply -f sso/k8s/deployment.yaml
+kubectl apply -f users/k8s/deployment.yaml
+
+<h1>Deploy Services</h1>
+kubectl apply -f admin/k8s/service.yaml
+kubectl apply -f blog/k8s/service.yaml
+kubectl apply -f frontend/k8s/service.yaml
+kubectl apply -f sso/k8s/service.yaml
+kubectl apply -f users/k8s/service.yaml
+<pre><code>
+
+<h3>Krok 10: Migracje Baz Danych</h3>
+
+<h4>10.1 Utworzenie Migration Jobs</h4>
+
+Utworzono pliki migration-job.yaml dla każdego serwisu:
+
+<strong>admin/k8s/migration-job.yaml</strong>:
+<pre><code>
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: admin-migration
+  namespace: portfolio
+  labels:
+    app.kubernetes.io/name: admin-migration
+    app.kubernetes.io/part-of: portfolio
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: admin-migration
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: ghcr.io/szymonborowski/microservices-admin:v0.0.1
+          command: ["php", "artisan", "migrate", "--force"]
+          envFrom:
+            - configMapRef:
+                name: admin-config
+            - secretRef:
+                name: admin-secret
+<pre><code>
+
+Podobne pliki dla: blog, frontend, sso, users.
+
+<h4>10.2 Wykonanie migracji</h4>
+
+<pre><code>
+<h1>Usuń stare Jobs (jeśli istnieją)</h1>
+kubectl delete job admin-migration blog-migration frontend-migration \
+  sso-migration users-migration -n portfolio --ignore-not-found=true
+
+<h1>Uruchom migracje</h1>
+kubectl apply -f admin/k8s/migration-job.yaml
+kubectl apply -f blog/k8s/migration-job.yaml
+kubectl apply -f frontend/k8s/migration-job.yaml
+kubectl apply -f sso/k8s/migration-job.yaml
+kubectl apply -f users/k8s/migration-job.yaml
+
+<h1>Sprawdź status</h1>
+kubectl get jobs -n portfolio
+<pre><code>
+
+<strong>Wynik:</strong>
+<pre><code>
+NAME                 STATUS     COMPLETIONS   DURATION   AGE
+admin-migration      Complete   1/1           6s         14s
+blog-migration       Complete   1/1           8s         14s
+frontend-migration   Failed     0/1           7m32s      7m32s
+sso-migration        Complete   1/1           6s         14s
+users-migration      Complete   1/1           7s         14s
+<pre><code>
+
+<strong>Uwaga:</strong> Frontend-migration failed - to normalne, frontend używa tylko Redis, nie ma tabel MySQL do migracji.
+
+<h3>Krok 11: Deployment Blog Consumer</h3>
+
+<pre><code>
+kubectl apply -f blog/k8s/consumer-deployment.yaml
+<pre><code>
+
+<strong>Wynik:</strong>
+<pre><code>
+deployment.apps/blog-consumer created
+<pre><code>
+
+<h3>Krok 12: Deployment Ingress</h3>
+
+<pre><code>
+kubectl apply -f admin/k8s/ingress.yaml
+kubectl apply -f frontend/k8s/ingress.yaml
+kubectl apply -f sso/k8s/ingress.yaml
+
+<h1>Sprawdź status</h1>
+kubectl get ingress -n portfolio
+<pre><code>
+
+<strong>Wynik:</strong>
+<pre><code>
+NAME       CLASS   HOSTS                  ADDRESS   PORTS     AGE
+admin      nginx   admin.portfolio.kube             80, 443   12s
+frontend   nginx   portfolio.kube                   80, 443   12s
+sso        nginx   sso.portfolio.kube               80, 443   12s
+<pre><code>
+
+<h3>Krok 13: Weryfikacja Deploymentu</h3>
+
+<pre><code>
+<h1>Sprawdź wszystkie pody</h1>
+kubectl get pods -n portfolio
+
+<h1>Sprawdź services</h1>
+kubectl get svc -n portfolio
+
+<h1>Sprawdź ingress</h1>
+kubectl get ingress -n portfolio
+<pre><code>
+
+<strong>Status końcowy podów:</strong>
+<pre><code>
+NAME                             READY   STATUS      RESTARTS       AGE
+admin-app-7b88d7fb87-gfx9z       2/2     Running     5 (18m ago)    20m
+blog-app-779647dd7f-qqjv4        2/2     Running     0              20m
+blog-consumer-6fcfd74b77-k66mk   1/1     Running     0              5m
+frontend-app-7d9c6ff9cd-84k76    2/2     Running     0              20s
+sso-app-6849cbf7f-fthsm          2/2     Running     5 (18m ago)    20m
+users-app-5684966b8f-nsp89       2/2     Running     5 (18m ago)    20m
+admin-mysql-0                    1/1     Running     0              16m
+blog-mysql-0                     1/1     Running     0              16m
+sso-mysql-0                      1/1     Running     0              16m
+users-mysql-0                    1/1     Running     0              16m
+frontend-redis-0                 1/1     Running     0              152m
+rabbitmq-0                       1/1     Running     12             152m
+<pre><code>
+
+---
+
+<h2>Napotkane Problemy i Rozwiązania</h2>
+
+<h3>Problem 1: ImagePullBackOff</h3>
+
+<strong>Objawy:</strong>
+<pre><code>
+kubectl get pods -n portfolio
+NAME                        READY   STATUS             RESTARTS   AGE
+admin-app-xxx               0/2     ImagePullBackOff   0          30s
+<pre><code>
+
+<strong>Diagnoza:</strong>
+<pre><code>
+kubectl describe pod admin-app-xxx -n portfolio
+<h1>Events:</h1>
+<h1>  Warning  Failed     5s    kubelet  Failed to pull image</h1>
+<h1>  "ghcr.io/szymonborowski/microservices-admin:v0.0.1":</h1>
+<h1>  rpc error: code = Unknown desc = Error response from daemon:</h1>
+<h1>  pull access denied for ghcr.io/szymonborowski/microservices-admin</h1>
+<pre><code>
+
+<strong>Przyczyna:</strong>
+<li>Obrazy Docker znajdują się tylko na hoście</li>
+<li>Minikube używa własnego Docker daemon</li>
+<li>Minikube nie ma dostępu do obrazów na hoście</li>
+
+<strong>Rozwiązanie:</strong>
+<pre><code>
+<h1>Załaduj obrazy do Minikube</h1>
+minikube image load ghcr.io/szymonborowski/microservices-admin:v0.0.1 --profile=portfolio
+minikube image load ghcr.io/szymonborowski/microservices-blog:v0.0.1 --profile=portfolio
+minikube image load ghcr.io/szymonborowski/microservices-frontend:v0.0.1 --profile=portfolio
+minikube image load ghcr.io/szymonborowski/microservices-sso:v0.0.1 --profile=portfolio
+minikube image load ghcr.io/szymonborowski/microservices-users:v0.0.1 --profile=portfolio
+
+<h1>Weryfikacja</h1>
+minikube image ls --profile=portfolio | grep microservices
+<pre><code>
+
+<strong>Wynik:</strong> Pody zaczęły się poprawnie uruchamiać.
+
+---
+
+<h3>Problem 2: MySQL Access Denied (Najbardziej Złożony)</h3>
+
+<strong>Objawy:</strong>
+<pre><code>
+kubectl logs admin-app-xxx -n portfolio -c php-fpm
+<h1>SQLSTATE[HY000] [1045] Access denied for user 'admin'@'10.244.0.75'</h1>
+<h1>(using password: YES)</h1>
+<pre><code>
+
+<strong>Diagnoza - Iteracja 1:</strong>
+<pre><code>
+<h1>Sprawdź secret</h1>
+kubectl get secret admin-secret -n portfolio -o jsonpath='{.data.DB_PASSWORD}' | base64 -d
+<h1>Zwraca: (prawdziwe hasło)</h1>
+
+<h1>Sprawdź mysql-secret</h1>
+kubectl get secret admin-mysql-secret -n portfolio -o jsonpath='{.data.MYSQL_PASSWORD}' | base64 -d
+<h1>Zwraca: CHANGE_ME  ← PROBLEM!</h1>
+<pre><code>
+
+<strong>Przyczyna - Iteracja 1:</strong>
+<li>admin-secret ma poprawne hasło</li>
+<li>admin-mysql-secret ma "CHANGE_ME"</li>
+<li>Hasła się nie zgadzają</li>
+
+<strong>Próba naprawy 1 - FAILED:</strong>
+<pre><code>
+<h1>Ręczna synchronizacja secrets</h1>
+kubectl delete secret admin-mysql-secret -n portfolio
+kubectl apply -f admin/k8s/mysql.yaml
+
+<h1>Restart poda MySQL</h1>
+kubectl delete pod admin-mysql-0 -n portfolio
+<pre><code>
+
+<strong>Wynik:</strong> Nie pomogło - secret znowu miał "CHANGE_ME"
+
+<strong>Diagnoza - Iteracja 2:</strong>
+<pre><code>
+<h1>Sprawdź plik źródłowy</h1>
+cat admin/k8s/mysql.yaml | grep MYSQL_PASSWORD
+<h1>stringData:</h1>
+<h1>  MYSQL_PASSWORD: "CHANGE_ME"  ← AHA! Tu jest problem!</h1>
+<pre><code>
+
+<strong>Przyczyna - Root Cause:</strong>
+<li>Plik <code>mysql.yaml</code> zawiera <strong>definicję Secret</strong> z placeholderami</li>
+<li>Każde <code>kubectl apply -f mysql.yaml</code> <strong>nadpisuje</strong> poprawnie wygenerowane secrets</li>
+<li>Nawet po usunięciu PVC, nowe pod inicjalizuje się z nadpisanym secretem</li>
+
+<strong>Próba naprawy 2 - FAILED:</strong>
+<pre><code>
+<h1>Usuń pod i PVC</h1>
+kubectl delete pod admin-mysql-0 -n portfolio
+kubectl delete pvc mysql-data-admin-mysql-0 -n portfolio
+
+<h1>Zastosuj secrets ręcznie</h1>
+kubectl apply -f admin/k8s/secret.yaml
+
+<h1>Zastosuj mysql bez secret definition?</h1>
+<h1>Nie - mysql.yaml zawiera secret definition</h1>
+<pre><code>
+
+<strong>Wynik:</strong> Nie pomogło - mysql.yaml nadal nadpisywał secret
+
+<strong>Diagnoza - Iteracja 3:</strong>
+<pre><code>
+<h1>Sprawdź czy root może się zalogować</h1>
+kubectl exec -it admin-mysql-0 -n portfolio -- mysql -u root -p
+<h1>Enter password: (paste from secret)</h1>
+<h1>ERROR 1045 (28000): Access denied for user 'root'@'localhost'</h1>
+
+<h1>To oznacza że MySQL ma INNE hasło niż w secret!</h1>
+<pre><code>
+
+<strong>Przyczyna - Głębsza analiza:</strong>
+1. MySQL inicjalizuje się przy pierwszym starcie z hasłem z ENV
+2. Hasło jest zapisywane w PVC
+3. Przy restarcie MySQL używa hasła z PVC (ignoruje ENV)
+4. Secret jest nadpisywany przez mysql.yaml przy każdym apply
+5. Powstaje rozbieżność: Secret ma nowe hasło, MySQL ma stare
+
+<strong>Rozwiązanie końcowe:</strong>
+<pre><code>
+cd /home/decybell/dev/portfolio
+SERVICES=("admin" "blog" "sso" "users")
+
+<h1>Krok 1: Pobierz prawdziwe hasła z application secrets</h1>
+for SERVICE in "${SERVICES[@]}"; do
+    DB_PASS=$(kubectl get secret ${SERVICE}-secret -n portfolio \
+        -o jsonpath='{.data.DB_PASSWORD}' | base64 -d)
+
+    # Krok 2: Zastąp CHANGE_ME w mysql.yaml prawdziwymi hasłami
+    sed -i "s/MYSQL_PASSWORD: \"CHANGE_ME\"/MYSQL_PASSWORD: \"${DB_PASS}\"/g" \
+        ${SERVICE}/k8s/mysql.yaml
+    sed -i "s/MYSQL_ROOT_PASSWORD: \"CHANGE_ME\"/MYSQL_ROOT_PASSWORD: \"${DB_PASS}\"/g" \
+        ${SERVICE}/k8s/mysql.yaml
+
+    echo "✓ ${SERVICE}/k8s/mysql.yaml updated"
+done
+
+<h1>Krok 3: Usuń StatefulSets</h1>
+kubectl delete statefulset admin-mysql blog-mysql sso-mysql users-mysql -n portfolio
+
+<h1>Krok 4: Usuń PVCs (świeża inicjalizacja)</h1>
+kubectl delete pvc mysql-data-admin-mysql-0 mysql-data-blog-mysql-0 \
+    mysql-data-sso-mysql-0 mysql-data-users-mysql-0 -n portfolio
+
+<h1>Krok 5: Zastosuj zaktualizowane mysql.yaml</h1>
+kubectl apply -f admin/k8s/mysql.yaml
+kubectl apply -f blog/k8s/mysql.yaml
+kubectl apply -f sso/k8s/mysql.yaml
+kubectl apply -f users/k8s/mysql.yaml
+
+<h1>Krok 6: Czekaj aż MySQL będzie ready</h1>
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=admin-mysql \
+    -n portfolio --timeout=300s
+<h1>... (podobnie dla innych)</h1>
+
+<h1>Krok 7: Restart aplikacji</h1>
+kubectl rollout restart deployment admin-app blog-app sso-app users-app -n portfolio
+<pre><code>
+
+<strong>Wynik:</strong>
+<pre><code>
+kubectl get pods -n portfolio | grep app
+admin-app-7b88d7fb87-gfx9z       2/2     Running     0          2m
+blog-app-779647dd7f-qqjv4        2/2     Running     0          2m
+sso-app-6849cbf7f-fthsm          2/2     Running     0          2m
+users-app-5684966b8f-nsp89       2/2     Running     0          2m
+<pre><code>
+
+<strong>✅ Problem rozwiązany!</strong>
+
+<strong>Lekcja:</strong>
+<li>Nigdy nie umieszczaj Secret definitions w tym samym pliku co StatefulSet</li>
+<li>Albo generuj secrets przed deployment</li>
+<li>Albo używaj External Secrets Operator / Sealed Secrets</li>
+
+---
+
+<h3>Problem 3: Frontend zwraca błąd 500</h3>
+
+<strong>Objawy:</strong>
+<pre><code>
+curl -Lk https://portfolio.kube -I
+<h1>HTTP/2 500</h1>
+<pre><code>
+
+<strong>Diagnoza:</strong>
+<pre><code>
+kubectl logs -n portfolio deployment/frontend-app -c php-fpm --tail=50
+<pre><code>
+
+<strong>Znaleziony błąd:</strong>
+<pre><code>
+[2026-02-09 13:59:01] production.ERROR: cURL error 6:
+Could not resolve host: blog-nginx (DNS server returned general failure)
+for http://blog-nginx/api/v1/posts?per_page=10
+<pre><code>
+
+<strong>Przyczyna:</strong>
+<li>Frontend próbuje połączyć się z <code>http://blog-nginx</code></li>
+<li>Kubernetes Service nazywa się <code>blog</code>, nie <code>blog-nginx</code></li>
+<li>Brakuje zmiennych środowiskowych dla komunikacji wewnętrznej</li>
+
+<strong>Diagnoza szczegółowa:</strong>
+<pre><code>
+<h1>Sprawdź nazwę service</h1>
+kubectl get svc -n portfolio | grep blog
+<h1>blog             ClusterIP   10.109.34.146   <none>        80/TCP</h1>
+
+<h1>Sprawdź konfigurację aplikacji</h1>
+cat frontend/src/config/services.php
+<h1>'blog' => [</h1>
+<h1>    'url' => env('BLOG_API_URL_INTERNAL', 'https://blog.microservices.local'),</h1>
+<h1>],</h1>
+
+<h1>Sprawdź ConfigMap</h1>
+kubectl get configmap frontend-config -n portfolio -o yaml | grep BLOG
+<h1>(brak wyniku) ← Nie ma BLOG_API_URL_INTERNAL!</h1>
+<pre><code>
+
+<strong>Rozwiązanie:</strong>
+<pre><code>
+<h1>Zaktualizuj frontend/k8s/configmap.yaml</h1>
+<h1>Dodaj:</h1>
+<h1>  BLOG_API_URL_INTERNAL: "http://blog"</h1>
+<h1>  USERS_API_URL_INTERNAL: "http://users"</h1>
+<h1>  SSO_INTERNAL_URL: "http://sso"</h1>
+
+<h1>Zastosuj zmiany</h1>
+kubectl apply -f frontend/k8s/configmap.yaml
+
+<h1>Restart frontendu</h1>
+kubectl rollout restart deployment/frontend-app -n portfolio
+
+<h1>Test</h1>
+sleep 20
+curl -Lk https://portfolio.kube -I
+<h1>HTTP/2 200  ✅</h1>
+<pre><code>
+
+<strong>Lekcja:</strong>
+<li>W Kubernetes używaj Service names dla komunikacji wewnętrznej</li>
+<li>HTTP (nie HTTPS) dla pod-to-pod</li>
+<li>Zawsze definiuj zmienne środowiskowe dla wszystkich zależności</li>
+
+---
+
+<h3>Problem 4: Przeglądarka pokazuje "Not Secure"</h3>
+
+<strong>Objawy:</strong>
+<pre><code>
+Browser: https://portfolio.kube
+Warning: "Your connection is not private" / "Not Secure"
+<pre><code>
+
+<strong>Przyczyna:</strong>
+<li>Używaliśmy self-signed certificates (samo-podpisanych)</li>
+<li>Przeglądarki nie ufają certyfikatom nie wydanym przez zaufany CA</li>
+<li>Każda wizyta wymaga kliknięcia "Accept Risk"</li>
+
+<strong>Diagnoza:</strong>
+<pre><code>
+<h1>Sprawdź obecny certyfikat</h1>
+echo | openssl s_client -connect portfolio.kube:443 -servername portfolio.kube 2>/dev/null | \
+  openssl x509 -noout -issuer
+<h1>issuer=CN = portfolio.kube, O = Portfolio Local</h1>
+<h1>↑ Self-signed (issuer = subject)</h1>
+<pre><code>
+
+<strong>Rozwiązanie: mkcert (lokalny zaufany CA)</strong>
+
+mkcert tworzy lokalny Certificate Authority i dodaje go do systemowego trusted store, dzięki czemu przeglądarki automatycznie ufają wygenerowanym certyfikatom.
+
+<pre><code>
+<h1>Krok 1: Sprawdź czy mkcert jest zainstalowany</h1>
+which mkcert
+<h1>Jeśli nie: https://github.com/FiloSottile/mkcert#installation</h1>
+
+<h1>Krok 2: Zainstaluj lokalny CA (jednorazowo)</h1>
+mkcert -install
+<h1>The local CA is now installed in the system trust store! 👍</h1>
+<h1>The local CA is now installed in Firefox/Chrome trust store! 👍</h1>
+
+<h1>Krok 3: Wygeneruj wildcard certificate</h1>
+mkcert -cert-file frontend-tls.crt -key-file frontend-tls.key \
+  portfolio.kube "*.portfolio.kube"
+<h1>Created a new certificate valid for:</h1>
+<h1> - "portfolio.kube"</h1>
+<h1> - "*.portfolio.kube"</h1>
+<h1>It will expire on 9 May 2028 🗓</h1>
+
+<h1>Krok 4: Weryfikuj certyfikat</h1>
+ls -lh frontend-tls.*
+openssl x509 -in frontend-tls.crt -text -noout | grep -A 2 "Subject Alternative Name"
+<h1>X509v3 Subject Alternative Name:</h1>
+<h1>    DNS:portfolio.kube, DNS:*.portfolio.kube</h1>
+
+<h1>Krok 5: Zaktualizuj Kubernetes TLS secrets</h1>
+kubectl delete secret frontend-tls admin-tls sso-tls -n portfolio --ignore-not-found=true
+
+kubectl create secret tls frontend-tls --namespace=portfolio \
+  --key=frontend-tls.key --cert=frontend-tls.crt
+kubectl create secret tls admin-tls --namespace=portfolio \
+  --key=frontend-tls.key --cert=frontend-tls.crt
+kubectl create secret tls sso-tls --namespace=portfolio \
+  --key=frontend-tls.key --cert=frontend-tls.crt
+
+<h1>Krok 6: Przeładuj Ingress Controller</h1>
+kubectl rollout restart deployment ingress-nginx-controller -n ingress-nginx
+kubectl rollout status deployment ingress-nginx-controller -n ingress-nginx --timeout=60s
+
+<h1>Krok 7: Weryfikuj nowy certyfikat</h1>
+echo | openssl s_client -connect portfolio.kube:443 -servername portfolio.kube 2>/dev/null | \
+  openssl x509 -noout -subject -issuer
+<h1>subject=O = mkcert development certificate</h1>
+<h1>issuer=O = mkcert development CA  ← Zaufany CA!</h1>
+
+<h1>Krok 8: Test bez flagi -k (insecure)</h1>
+curl -I https://portfolio.kube
+<h1>HTTP/2 200  ✅ Działa bez ostrzeżeń!</h1>
+
+<h1>Cleanup</h1>
+rm -f frontend-tls.key frontend-tls.crt
+<pre><code>
+
+<strong>Wynik:</strong>
+<pre><code>
+Browser: https://portfolio.kube
+✅ 🔒 Secure (zielona kłódka)
+✅ Brak ostrzeżeń
+✅ Certyfikat ważny do: 9 maja 2028
+<pre><code>
+
+<strong>Lekcja:</strong>
+<li>Self-signed certyfikaty → ostrzeżenia w przeglądarce</li>
+<li>mkcert dla lokalnego development → automatycznie zaufane</li>
+<li>Wildcard cert <code>*.portfolio.kube</code> pokrywa wszystkie subdomeny</li>
+<li>W produkcji używaj Let's Encrypt</li>
+
+<strong>Porównanie rozwiązań:</strong>
+
+| Rozwiązanie | Przeglądarki ufają? | Ważność | Zastosowanie |
+|-------------|-------------------|---------|--------------|
+| Self-signed | ❌ NIE | 365 dni | ❌ Nie zalecane |
+| mkcert | ✅ TAK | ~2 lata | ✅ Lokalny dev |
+| Let's Encrypt | ✅ TAK | 90 dni | ✅ Produkcja |
+
+<strong>Regeneracja certyfikatów (za ~2 lata):</strong>
+<pre><code>
+<h1>Wygeneruj nowy certyfikat</h1>
+mkcert -cert-file frontend-tls.crt -key-file frontend-tls.key \
+  portfolio.kube "*.portfolio.kube"
+
+<h1>Zaktualizuj secrets</h1>
+kubectl delete secret frontend-tls admin-tls sso-tls -n portfolio
+kubectl create secret tls frontend-tls --namespace=portfolio \
+  --key=frontend-tls.key --cert=frontend-tls.crt
+kubectl create secret tls admin-tls --namespace=portfolio \
+  --key=frontend-tls.key --cert=frontend-tls.crt
+kubectl create secret tls sso-tls --namespace=portfolio \
+  --key=frontend-tls.key --cert=frontend-tls.crt
+
+<h1>Przeładuj Ingress</h1>
+kubectl rollout restart deployment ingress-nginx-controller -n ingress-nginx
+
+<h1>Cleanup</h1>
+rm -f frontend-tls.key frontend-tls.crt
+<pre><code>
+
+---
+
+<h2>Polecenia Administracyjne</h2>
+
+<h3>Zarządzanie Klastrem Minikube</h3>
+
+<h4>Start/Stop klastra</h4>
+<pre><code>
+<h1>Start klastra</h1>
+minikube start --profile=portfolio
+
+<h1>Stop klastra</h1>
+minikube stop --profile=portfolio
+
+<h1>Restart klastra</h1>
+minikube delete --profile=portfolio
+minikube start --profile=portfolio \
+  --driver=docker --cpus=4 --memory=8192 --disk-size=40g
+
+<h1>Status klastra</h1>
+minikube status --profile=portfolio
+
+<h1>IP klastra</h1>
+minikube ip --profile=portfolio
+
+<h1>SSH do klastra</h1>
+minikube ssh --profile=portfolio
+<pre><code>
+
+<h4>Dashboard</h4>
+<pre><code>
+<h1>Uruchom dashboard</h1>
+minikube dashboard --profile=portfolio
+
+<h1>Dashboard w tle</h1>
+minikube dashboard --profile=portfolio &
+<pre><code>
+
+<h4>Addons</h4>
+<pre><code>
+<h1>Lista addons</h1>
+minikube addons list --profile=portfolio
+
+<h1>Włącz addon</h1>
+minikube addons enable metrics-server --profile=portfolio
+
+<h1>Wyłącz addon</h1>
+minikube addons disable dashboard --profile=portfolio
+<pre><code>
+
+<h4>Obrazy Docker</h4>
+<pre><code>
+<h1>Lista obrazów w Minikube</h1>
+minikube image ls --profile=portfolio
+
+<h1>Załaduj obraz</h1>
+minikube image load <image-name> --profile=portfolio
+
+<h1>Usuń obraz</h1>
+minikube image rm <image-name> --profile=portfolio
+
+<h1>Build obrazu w Minikube</h1>
+eval $(minikube docker-env --profile=portfolio)
+docker build -t myimage:tag .
+<pre><code>
+
+<h3>Zarządzanie Podami</h3>
+
+<h4>Podstawowe operacje</h4>
+<pre><code>
+<h1>Lista podów</h1>
+kubectl get pods -n portfolio
+
+<h1>Lista podów z dodatkowymi informacjami</h1>
+kubectl get pods -n portfolio -o wide
+
+<h1>Szczegóły poda</h1>
+kubectl describe pod <pod-name> -n portfolio
+
+<h1>Logi poda</h1>
+kubectl logs <pod-name> -n portfolio
+
+<h1>Logi z konkretnego kontenera</h1>
+kubectl logs <pod-name> -c <container-name> -n portfolio
+
+<h1>Logi w czasie rzeczywistym</h1>
+kubectl logs -f <pod-name> -n portfolio
+
+<h1>Logi z ostatnich X linii</h1>
+kubectl logs <pod-name> -n portfolio --tail=50
+
+<h1>Poprzednie logi (po crashu)</h1>
+kubectl logs <pod-name> -n portfolio --previous
+<pre><code>
+
+<h4>Exec w podzie</h4>
+<pre><code>
+<h1>Shell w podzie</h1>
+kubectl exec -it <pod-name> -n portfolio -- /bin/bash
+
+<h1>Pojedyncze polecenie</h1>
+kubectl exec <pod-name> -n portfolio -- ls -la
+
+<h1>W konkretnym kontenerze</h1>
+kubectl exec -it <pod-name> -c <container-name> -n portfolio -- /bin/bash
+<pre><code>
+
+<h4>Debugging</h4>
+<pre><code>
+<h1>Port forward</h1>
+kubectl port-forward <pod-name> 8080:80 -n portfolio
+
+<h1>Kopiowanie plików</h1>
+kubectl cp <pod-name>:/path/to/file ./local-file -n portfolio
+kubectl cp ./local-file <pod-name>:/path/to/file -n portfolio
+
+<h1>Top (zasoby)</h1>
+kubectl top pods -n portfolio
+kubectl top nodes
+
+<h1>Events</h1>
+kubectl get events -n portfolio --sort-by='.lastTimestamp'
+
+<h1>Watch (odświeżanie)</h1>
+kubectl get pods -n portfolio --watch
+<pre><code>
+
+<h3>Zarządzanie Deployments</h3>
+
+<pre><code>
+<h1>Lista deployments</h1>
+kubectl get deployments -n portfolio
+
+<h1>Szczegóły deployment</h1>
+kubectl describe deployment <deployment-name> -n portfolio
+
+<h1>Skalowanie</h1>
+kubectl scale deployment <deployment-name> --replicas=3 -n portfolio
+
+<h1>Restart deployment</h1>
+kubectl rollout restart deployment/<deployment-name> -n portfolio
+
+<h1>Status rollout</h1>
+kubectl rollout status deployment/<deployment-name> -n portfolio
+
+<h1>Historia rollout</h1>
+kubectl rollout history deployment/<deployment-name> -n portfolio
+
+<h1>Rollback</h1>
+kubectl rollout undo deployment/<deployment-name> -n portfolio
+
+<h1>Rollback do konkretnej rewizji</h1>
+kubectl rollout undo deployment/<deployment-name> --to-revision=2 -n portfolio
+
+<h1>Pauza rollout</h1>
+kubectl rollout pause deployment/<deployment-name> -n portfolio
+
+<h1>Wznowienie rollout</h1>
+kubectl rollout resume deployment/<deployment-name> -n portfolio
+<pre><code>
+
+<h3>Zarządzanie Services</h3>
+
+<pre><code>
+<h1>Lista services</h1>
+kubectl get svc -n portfolio
+
+<h1>Szczegóły service</h1>
+kubectl describe svc <service-name> -n portfolio
+
+<h1>Endpoints (pody za service)</h1>
+kubectl get endpoints <service-name> -n portfolio
+
+<h1>Test connectivity</h1>
+kubectl run test-pod --rm -it --image=busybox -n portfolio -- sh
+<h1>W pod:</h1>
+wget -O- http://blog
+<pre><code>
+
+<h3>Zarządzanie ConfigMaps i Secrets</h3>
+
+<pre><code>
+<h1>Lista ConfigMaps</h1>
+kubectl get configmaps -n portfolio
+
+<h1>Zawartość ConfigMap</h1>
+kubectl get configmap <name> -n portfolio -o yaml
+
+<h1>Edycja ConfigMap</h1>
+kubectl edit configmap <name> -n portfolio
+
+<h1>Usuń ConfigMap</h1>
+kubectl delete configmap <name> -n portfolio
+
+<h1>Lista Secrets</h1>
+kubectl get secrets -n portfolio
+
+<h1>Zawartość Secret (base64)</h1>
+kubectl get secret <name> -n portfolio -o yaml
+
+<h1>Dekoduj Secret</h1>
+kubectl get secret <name> -n portfolio -o jsonpath='{.data.KEY}' | base64 -d
+
+<h1>Utwórz Secret z pliku</h1>
+kubectl create secret generic <name> --from-file=key=./file -n portfolio
+
+<h1>Utwórz Secret z literal</h1>
+kubectl create secret generic <name> --from-literal=key=value -n portfolio
+<pre><code>
+
+<h3>Zarządzanie StatefulSets</h3>
+
+<pre><code>
+<h1>Lista StatefulSets</h1>
+kubectl get statefulsets -n portfolio
+
+<h1>Szczegóły StatefulSet</h1>
+kubectl describe statefulset <name> -n portfolio
+
+<h1>Skalowanie</h1>
+kubectl scale statefulset <name> --replicas=3 -n portfolio
+
+<h1>Restart StatefulSet (delete pods jeden po drugim)</h1>
+kubectl delete pod <statefulset-name>-0 -n portfolio
+<h1>Poczekaj aż pod się uruchomi, potem:</h1>
+kubectl delete pod <statefulset-name>-1 -n portfolio
+
+<h1>Update StatefulSet</h1>
+kubectl apply -f <statefulset.yaml>
+kubectl rollout status statefulset/<name> -n portfolio
+<pre><code>
+
+<h3>Zarządzanie PersistentVolumeClaims</h3>
+
+<pre><code>
+<h1>Lista PVCs</h1>
+kubectl get pvc -n portfolio
+
+<h1>Szczegóły PVC</h1>
+kubectl describe pvc <name> -n portfolio
+
+<h1>Lista PVs</h1>
+kubectl get pv
+
+<h1>Usuń PVC (dane zostaną usunięte!)</h1>
+kubectl delete pvc <name> -n portfolio
+
+<h1>Backup PVC (przykład z MySQL)</h1>
+kubectl exec <mysql-pod> -n portfolio -- \
+  mysqldump -u root -p${MYSQL_ROOT_PASSWORD} --all-databases > backup.sql
+<pre><code>
+
+<h3>Zarządzanie Ingress</h3>
+
+<pre><code>
+<h1>Lista Ingress</h1>
+kubectl get ingress -n portfolio
+
+<h1>Szczegóły Ingress</h1>
+kubectl describe ingress <name> -n portfolio
+
+<h1>Test Ingress</h1>
+curl -Lk https://portfolio.kube -I
+
+<h1>Logi Ingress Controller</h1>
+kubectl logs -n ingress-nginx deployment/ingress-nginx-controller
+
+<h1>Restart Ingress Controller</h1>
+kubectl rollout restart deployment/ingress-nginx-controller -n ingress-nginx
+<pre><code>
+
+<h3>Zarządzanie Jobs</h3>
+
+<pre><code>
+<h1>Lista Jobs</h1>
+kubectl get jobs -n portfolio
+
+<h1>Szczegóły Job</h1>
+kubectl describe job <name> -n portfolio
+
+<h1>Logi z Job</h1>
+kubectl logs job/<name> -n portfolio
+
+<h1>Usuń Job</h1>
+kubectl delete job <name> -n portfolio
+
+<h1>Usuń wszystkie zakończone Jobs</h1>
+kubectl delete jobs --field-selector status.successful=1 -n portfolio
+<pre><code>
+
+<h3>Diagnostyka i Troubleshooting</h3>
+
+<pre><code>
+<h1>Sprawdź健康 podów</h1>
+kubectl get pods -n portfolio | grep -v Running
+
+<h1>Sprawdź eventy</h1>
+kubectl get events -n portfolio --sort-by='.lastTimestamp' | tail -20
+
+<h1>Sprawdź użycie zasobów</h1>
+kubectl top pods -n portfolio --sort-by=memory
+kubectl top pods -n portfolio --sort-by=cpu
+
+<h1>Sprawdź logi z wszystkich podów deployment</h1>
+kubectl logs -n portfolio deployment/<name> --all-containers=true
+
+<h1>Sprawdź DNS</h1>
+kubectl run test-dns --rm -it --image=busybox -n portfolio -- nslookup blog
+
+<h1>Sprawdź connectivity</h1>
+kubectl run test-curl --rm -it --image=curlimages/curl -n portfolio -- \
+  curl -v http://blog
+
+<h1>Sprawdź secrets aplikacji</h1>
+for svc in admin blog frontend sso users; do
+  echo "=== $svc ==="
+  kubectl get secret ${svc}-secret -n portfolio -o jsonpath='{.data}' | jq
+done
+
+<h1>Sprawdź wszystkie resources w namespace</h1>
+kubectl api-resources --verbs=list --namespaced -o name | \
+  xargs -n 1 kubectl get --show-kind --ignore-not-found -n portfolio
+<pre><code>
+
+<h3>Cleanup i Maintenance</h3>
+
+<pre><code>
+<h1>Usuń wszystkie pody w namespace</h1>
+kubectl delete pods --all -n portfolio
+
+<h1>Usuń deployment ze wszystkim</h1>
+kubectl delete deployment <name> -n portfolio
+
+<h1>Usuń namespace (UWAGA: usuwa wszystko!)</h1>
+kubectl delete namespace portfolio
+
+<h1>Wyczyść zakończone pody</h1>
+kubectl delete pod --field-selector=status.phase==Succeeded -n portfolio
+kubectl delete pod --field-selector=status.phase==Failed -n portfolio
+
+<h1>Restart wszystkich deployments</h1>
+kubectl rollout restart deployment -n portfolio
+
+<h1>Force delete poda</h1>
+kubectl delete pod <name> --grace-period=0 --force -n portfolio
+<pre><code>
+
+<h3>Backup i Restore</h3>
+
+<pre><code>
+<h1>Backup wszystkich manifestów</h1>
+kubectl get all -n portfolio -o yaml > backup-all.yaml
+
+<h1>Backup ConfigMaps</h1>
+kubectl get configmaps -n portfolio -o yaml > backup-configmaps.yaml
+
+<h1>Backup Secrets</h1>
+kubectl get secrets -n portfolio -o yaml > backup-secrets.yaml
+
+<h1>Backup PVC</h1>
+kubectl get pvc -n portfolio -o yaml > backup-pvcs.yaml
+
+<h1>Restore z backup</h1>
+kubectl apply -f backup-all.yaml
+<pre><code>
+
+---
+
+<h2>Weryfikacja i Testy</h2>
+
+<h3>Test 1: Sprawdzenie wszystkich podów</h3>
+
+<pre><code>
+kubectl get pods -n portfolio
+<pre><code>
+
+<strong>Oczekiwany wynik:</strong>
+<li>Wszystkie pody w stanie <code>Running</code> lub <code>Completed</code> (dla Jobs)</li>
+<li><code>READY</code> pokazuje <code>X/X</code> (np. <code>2/2</code> dla aplikacji)</li>
+
+<h3>Test 2: Sprawdzenie health endpoints</h3>
+
+<pre><code>
+<h1>Test PHP-FPM (readiness)</h1>
+kubectl exec -n portfolio deployment/frontend-app -c nginx -- \
+  curl -f http://localhost/ready
+
+<h1>Test health endpoint</h1>
+kubectl exec -n portfolio deployment/frontend-app -c nginx -- \
+  curl -f http://localhost/health
+<pre><code>
+
+<strong>Oczekiwany wynik:</strong> <code>200 OK</code>
+
+<h3>Test 3: Dostęp przez Ingress</h3>
+
+<pre><code>
+<h1>Frontend</h1>
+curl -Lk https://portfolio.kube -I
+<h1>Oczekiwany: HTTP/2 200</h1>
+
+<h1>Admin</h1>
+curl -Lk https://admin.portfolio.kube -I
+<h1>Oczekiwany: HTTP/2 302 (redirect do /admin/login) lub 200</h1>
+
+<h1>SSO</h1>
+curl -Lk https://sso.portfolio.kube -I
+<h1>Oczekiwany: HTTP/2 404 (brak homepage) lub 200</h1>
+<pre><code>
+
+<h3>Test 4: Komunikacja wewnętrzna</h3>
+
+<pre><code>
+<h1>Test z frontend do blog</h1>
+kubectl exec -n portfolio deployment/frontend-app -c php-fpm -- \
+  curl -s http://blog/health
+
+<h1>Test z frontend do users</h1>
+kubectl exec -n portfolio deployment/frontend-app -c php-fpm -- \
+  curl -s http://users/health
+<pre><code>
+
+<strong>Oczekiwany wynik:</strong> Odpowiedź z endpoint (nie connection refused)
+
+<h3>Test 5: Bazy danych</h3>
+
+<pre><code>
+<h1>MySQL connection test</h1>
+kubectl exec -it admin-mysql-0 -n portfolio -- mysql -u admin -p -e "SHOW DATABASES;"
+
+<h1>Redis connection test</h1>
+kubectl exec -it frontend-redis-0 -n portfolio -- redis-cli ping
+<h1>Oczekiwany: PONG</h1>
+
+<h1>RabbitMQ connection test</h1>
+kubectl exec -it rabbitmq-0 -n portfolio -- rabbitmqctl status
+<pre><code>
+
+<h3>Test 6: Logi bez błędów</h3>
+
+<pre><code>
+<h1>Sprawdź logi aplikacji</h1>
+kubectl logs -n portfolio deployment/frontend-app -c php-fpm --tail=50 | \
+  grep -i "error\|exception\|fatal"
+
+<h1>Powinno nie zwrócić żadnych błędów krytycznych</h1>
+<pre><code>
+
+<h3>Test 7: Metryki i zasoby</h3>
+
+<pre><code>
+<h1>CPU i Memory usage</h1>
+kubectl top pods -n portfolio
+
+<h1>Disk usage (PVC)</h1>
+kubectl get pvc -n portfolio
+<pre><code>
+
+<h3>Test 8: Ingress Controller</h3>
+
+<pre><code>
+<h1>Sprawdź status Ingress Controller</h1>
+kubectl get pods -n ingress-nginx
+
+<h1>Sprawdź logi Ingress</h1>
+kubectl logs -n ingress-nginx deployment/ingress-nginx-controller --tail=20
+<pre><code>
+
+---
+
+<h2>Podsumowanie Wdrożenia</h2>
+
+<h3>Osiągnięte Cele</h3>
+
+✅ <strong>Środowisko Kubernetes</strong>
+<li>Minikube skonfigurowany i działający</li>
+<li>4 CPU, 8GB RAM, 40GB disk</li>
+<li>Addons: ingress, metrics-server, dashboard</li>
+
+✅ <strong>Aplikacje</strong>
+<li>5 mikrousług Laravel wdrożonych i działających</li>
+<li>1 worker (blog-consumer) działający</li>
+<li>Wszystkie pody w stanie <code>Running</code></li>
+
+✅ <strong>Bazy Danych</strong>
+<li>4 instancje MySQL (StatefulSets z PVC)</li>
+<li>1 instancja Redis</li>
+<li>1 instancja RabbitMQ</li>
+<li>Migracje wykonane poprawnie</li>
+
+✅ <strong>Networking</strong>
+<li>Ingress Controller z TLS</li>
+<li>Certyfikaty self-signed wygenerowane</li>
+<li>DNS skonfigurowany (/etc/hosts)</li>
+<li>Service Discovery działa</li>
+
+✅ <strong>Bezpieczeństwo</strong>
+<li>Secrets wygenerowane i zastosowane</li>
+<li>Unikalne hasła dla każdej usługi</li>
+<li>TLS dla komunikacji zewnętrznej</li>
+<li>HTTP dla komunikacji wewnętrznej</li>
+
+<h3>Kluczowe Lekcje</h3>
+
+1. <strong>Secrets Management</strong>
+   - Nigdy nie commituj secrets do repo
+   - Nie umieszczaj Secret definitions razem ze StatefulSets
+   - Używaj External Secrets Operator w produkcji
+
+2. <strong>Service Discovery</strong>
+   - Używaj Service names dla komunikacji wewnętrznej
+   - HTTP (nie HTTPS) dla pod-to-pod
+   - Definiuj zmienne środowiskowe dla wszystkich zależności
+
+3. <strong>StatefulSets i PVC</strong>
+   - PVC przechowują dane między restartami
+   - Przy zmianie secrets trzeba usunąć PVC
+   - Backup PVC przed usunięciem
+
+4. <strong>Debugging</strong>
+   - <code>kubectl logs</code> - pierwszy krok diagnostyki
+   - <code>kubectl describe</code> - szczegóły i eventy
+   - <code>kubectl exec</code> - dostęp do poda
+
+<h3>Następne Kroki (Opcjonalne)</h3>
+
+1. <strong>CI/CD</strong>
+   - GitHub Actions Self-Hosted Runner
+   - Automatyczny build i deploy
+
+2. <strong>Monitoring</strong>
+   - Prometheus + Grafana
+   - Loki dla logów
+
+3. <strong>Backup</strong>
+   - Velero dla backup PVC
+   - Cron Jobs dla backup baz danych
+
+4. <strong>Security</strong>
+   - Network Policies
+   - Pod Security Standards
+   - External Secrets Operator
+
+---
+
+<h2>Appendix</h2>
+
+<h3>Pliki Utworzone Podczas Wdrożenia</h3>
+
+<pre><code>
+/home/decybell/dev/portfolio/
+├── scripts/
+│   └── generate-k8s-secrets.sh          # Generator secrets
+├── admin/k8s/
+│   ├── migration-job.yaml               # Job dla migracji
+│   ├── mysql.yaml                       # Zaktualizowany z hasłami
+│   └── secret.yaml                      # Wygenerowany secret
+├── blog/k8s/
+│   ├── migration-job.yaml
+│   ├── mysql.yaml
+│   └── secret.yaml
+├── frontend/k8s/
+│   ├── configmap.yaml                   # Zaktualizowany z internal URLs
+│   ├── migration-job.yaml
+│   └── secret.yaml
+├── sso/k8s/
+│   ├── migration-job.yaml
+│   ├── mysql.yaml
+│   └── secret.yaml
+└── users/k8s/
+    ├── migration-job.yaml
+    ├── mysql.yaml
+    └── secret.yaml
+<pre><code>
+
+<h3>Pliki w .gitignore</h3>
+
+<pre><code>
+<h1>Kubernetes secrets (nigdy nie commituj!)</h1>
+*/k8s/secret.yaml
+
+<h1>TLS certificates</h1>
+*-tls.key
+*-tls.crt
+
+<h1>Backup files</h1>
+backup-*.yaml
+<pre><code>
+
+<h3>Zmienne Środowiskowe - Kompletna Lista</h3>
+
+<h4>Frontend ConfigMap</h4>
+<pre><code>
+APP_NAME: "Frontend"
+APP_ENV: "production"
+APP_DEBUG: "false"
+APP_URL: "https://portfolio.kube"
+LOG_CHANNEL: "stderr"
+REDIS_HOST: "frontend-redis"
+REDIS_PORT: "6379"
+BLOG_API_URL_INTERNAL: "http://blog"
+USERS_API_URL_INTERNAL: "http://users"
+SSO_INTERNAL_URL: "http://sso"
+<pre><code>
+
+<h4>Admin/Blog/SSO/Users ConfigMap (przykład)</h4>
+<pre><code>
+APP_NAME: "Admin"
+APP_ENV: "production"
+APP_DEBUG: "false"
+APP_URL: "https://admin.portfolio.kube"
+LOG_CHANNEL: "stderr"
+DB_HOST: "admin-mysql"
+DB_PORT: "3306"
+DB_DATABASE: "admin"
+DB_USERNAME: "admin"
+<pre><code>
+
+<h4>MySQL Secrets (przykład)</h4>
+<pre><code>
+MYSQL_DATABASE: "admin"
+MYSQL_USER: "admin"
+MYSQL_PASSWORD: "<generated-password>"
+MYSQL_ROOT_PASSWORD: "<generated-password>"
+<pre><code>
+
+---
+
+<h2>Kontakt i Wsparcie</h2>
+
+W przypadku problemów:
+
+1. <strong>Sprawdź logi:</strong>
+   <pre><code>
+   kubectl logs -n portfolio <pod-name>
+   <pre><code>
+
+2. <strong>Sprawdź eventy:</strong>
+   <pre><code>
+   kubectl get events -n portfolio --sort-by='.lastTimestamp'
+   <pre><code>
+
+3. <strong>Sprawdź dokumentację:</strong>
+   - Kubernetes: https://kubernetes.io/docs/
+   - Minikube: https://minikube.sigs.k8s.io/docs/
+
+4. <strong>Dashboard:</strong>
+   <pre><code>
+   minikube dashboard --profile=portfolio
+   <pre><code>
+
+---
+
+<strong>Koniec dokumentacji</strong>
+
+Wersja: 1.0
+Data: 9 lutego 2026
+Autor: Deployment przeprowadzony z Claude Code
+</body></html>
