@@ -6,10 +6,6 @@ A blogging platform built with microservices architecture.
 
 ## Architecture
 
-> **Note:**  For full control you'll want to get comfortable with minikube commands, Ingress setup, and cluster management.  Spend some time tomorrow digging into starting/stopping clusters, port‑forwarding, ingress rules and ArgoCD operations — the CI/CD tooling builds images and updates manifests, but you still need to know how to run and manage the apps locally.
->
-
-
 
 ```
                     ┌─────────────┐

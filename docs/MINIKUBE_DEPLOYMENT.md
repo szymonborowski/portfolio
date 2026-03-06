@@ -1,63 +1,63 @@
-# Dokumentacja Wdrożenia Mikrousług Portfolio na Minikube
+# Portfolio Microservices Deployment Documentation on Minikube
 
-**Data wdrożenia:** 9 lutego 2026
-**Środowisko:** Minikube (lokalne)
-**Platforma:** Linux 6.14.0-37-generic
+**Deployment date:** February 9, 2026
+**Environment:** Minikube (local)
+**Platform:** Linux 6.14.0-37-generic
 **Kubernetes:** v1.35.0
 **Minikube:** v1.38.0
 
 ---
 
-## Spis Treści
+## Table of Contents
 
-1. [Podsumowanie Wdrożenia](#podsumowanie-wdrożenia)
-2. [Architektura Systemu](#architektura-systemu)
-3. [Instalacja i Konfiguracja](#instalacja-i-konfiguracja)
-4. [Deployment Krok po Kroku](#deployment-krok-po-kroku)
-5. [Napotkane Problemy i Rozwiązania](#napotkane-problemy-i-rozwiązania)
-6. [Polecenia Administracyjne](#polecenia-administracyjne)
-7. [Weryfikacja i Testy](#weryfikacja-i-testy)
+1. [Deployment Summary](#deployment-summary)
+2. [System Architecture](#system-architecture)
+3. [Installation and Configuration](#installation-and-configuration)
+4. [Step-by-Step Deployment](#step-by-step-deployment)
+5. [Encountered Problems and Solutions](#encountered-problems-and-solutions)
+6. [Administrative Commands](#administrative-commands)
+7. [Verification and Tests](#verification-and-tests)
 
 ---
 
-## Podsumowanie Wdrożenia
+## Deployment Summary
 
-### Wdrożone Komponenty
+### Deployed Components
 
-#### Mikrousługi Laravel (5 serwisów):
-- **admin-app** - Panel administracyjny (https://admin.portfolio.kube)
-- **blog-app** - Serwis blogowy
-- **frontend-app** - Aplikacja frontendowa (https://portfolio.kube)
+#### Laravel Microservices (5 services):
+- **admin-app** - Administrative panel (https://admin.portfolio.kube)
+- **blog-app** - Blog service
+- **frontend-app** - Frontend application (https://portfolio.kube)
 - **sso-app** - Single Sign-On (https://sso.portfolio.kube)
-- **users-app** - Zarządzanie użytkownikami
+- **users-app** - User management
 
-#### Workery:
-- **blog-consumer** - Consumer RabbitMQ dla serwisu blogowego
+#### Workers:
+- **blog-consumer** - RabbitMQ consumer for blog service
 
-#### Bazy Danych:
-- **MySQL**: 4 instancje (admin-mysql, blog-mysql, sso-mysql, users-mysql)
-- **Redis**: 1 instancja (frontend-redis)
-- **RabbitMQ**: 1 instancja (messaging)
+#### Databases:
+- **MySQL**: 4 instances (admin-mysql, blog-mysql, sso-mysql, users-mysql)
+- **Redis**: 1 instance (frontend-redis)
+- **RabbitMQ**: 1 instance (messaging)
 
-#### Infrastruktura:
+#### Infrastructure:
 - **Ingress Controller**: nginx-ingress
-- **TLS**: Self-signed certificates dla *.portfolio.kube
+- **TLS**: Self-signed certificates for *.portfolio.kube
 - **Namespace**: portfolio
 - **Domain**: *.portfolio.kube (192.168.49.2)
 
-### Status Końcowy
+### Final Status
 
-✅ Wszystkie pody działają poprawnie
-✅ Migracje baz danych wykonane
-✅ Ingress skonfigurowany z TLS
-✅ Komunikacja wewnętrzna między serwisami działa
-✅ Dostęp zewnętrzny przez HTTPS
+✅ All pods running correctly
+✅ Database migrations executed
+✅ Ingress configured with TLS
+✅ Internal communication between services working
+✅ External access via HTTPS
 
 ---
 
-## Architektura Systemu
+## System Architecture
 
-### Topologia Sieciowa
+### Network Topology
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -108,17 +108,17 @@
 └───────────────────────────────┴──────────┴──┴──────────┴───────┘
 ```
 
-### Wzorzec Komunikacji
+### Communication Pattern
 
-#### Zewnętrzna (HTTPS):
+#### External (HTTPS):
 - Browser → Ingress (TLS) → Services
 
-#### Wewnętrzna (HTTP):
+#### Internal (HTTP):
 - Frontend → http://blog (Kubernetes Service Discovery)
 - Frontend → http://users
 - Frontend → http://sso
 
-#### Architektura Poda (PHP-FPM + Nginx):
+#### Pod Architecture (PHP-FPM + Nginx):
 ```
 ┌─────────────────────────────┐
 │         Pod                 │
@@ -234,15 +234,15 @@ A typical daily workflow looks like this:
 
 Secrets and certificates are generated once and live in the cluster. Repeat creation only on a fresh install, when keys change, or if resources are manually deleted.
 
-**Uzasadnienie zasobów:**
-- **4 CPU**: 5 aplikacji + 4 MySQL + Redis + RabbitMQ + system overhead
-- **8GB RAM**: Wymagane dla wszystkich podów + bufor
-- **40GB disk**: PVCs dla baz danych (22Gi) + obrazy Docker + bufor
+**Resource Justification:**
+- **4 CPU**: 5 applications + 4 MySQL + Redis + RabbitMQ + system overhead
+- **8GB RAM**: Required for all pods + buffer
+- **40GB disk**: PVCs for databases (22Gi) + Docker images + buffer
 
-### 4. Konfiguracja Bash Completion (opcjonalnie)
+### 4. Bash Completion Configuration (optional)
 
 ```bash
-# Dodanie auto-completion dla kubectl
+# Add auto-completion for kubectl
 echo 'source <(kubectl completion bash)' >> ~/.bashrc
 echo 'alias k=kubectl' >> ~/.bashrc
 echo 'complete -F __start_kubectl k' >> ~/.bashrc
@@ -251,13 +251,13 @@ source ~/.bashrc
 
 ---
 
-## Deployment Krok po Kroku
+## Step-by-Step Deployment
 
-### Krok 1: Generowanie Secrets
+### Step 1: Generating Secrets
 
-#### 1.1 Utworzenie skryptu generującego secrets
+#### 1.1 Creating the secrets generation script
 
-Utworzono plik: `/home/decybell/dev/portfolio/scripts/generate-k8s-secrets.sh`
+File created: `/home/decybell/dev/portfolio/scripts/generate-k8s-secrets.sh`
 
 ```bash
 #!/bin/bash
@@ -271,23 +271,23 @@ USERS_API_KEY=$(openssl rand -base64 32)
 for SERVICE in "${SERVICES[@]}"; do
     echo "Generating secret for ${SERVICE}..."
 
-    # Generuj APP_KEY używając Docker image
+    # Generate APP_KEY using Docker image
     APP_KEY=$(docker run --rm ghcr.io/szymonborowski/microservices-${SERVICE}:v0.0.1 \
         php artisan key:generate --show 2>/dev/null)
 
-    # Generuj hasła dla DB
+    # Generate DB passwords
     DB_PASSWORD=$(openssl rand -base64 32)
 
-    # Kopiuj template i zastąp placeholdery
+    # Copy template and replace placeholders
     cp "${SERVICE}/k8s/secret.example.yaml" "${SERVICE}/k8s/secret.yaml"
 
-    # Zamień CHANGE_ME na prawdziwe wartości
+    # Replace CHANGE_ME with real values
     sed -i "s|base64:CHANGE_ME_GENERATE_WITH_PHP_ARTISAN_KEY_GENERATE|${APP_KEY}|g" \
         "${SERVICE}/k8s/secret.yaml"
     sed -i "s|DB_PASSWORD: \"CHANGE_ME\"|DB_PASSWORD: \"${DB_PASSWORD}\"|g" \
         "${SERVICE}/k8s/secret.yaml"
 
-    # Dla users dodaj USERS_API_KEY
+    # For users add USERS_API_KEY
     if [ "${SERVICE}" = "users" ]; then
         sed -i "s|USERS_API_KEY: \"CHANGE_ME\"|USERS_API_KEY: \"${USERS_API_KEY}\"|g" \
             "${SERVICE}/k8s/secret.yaml"
@@ -301,7 +301,7 @@ echo "All secrets generated!"
 echo "IMPORTANT: secret.yaml files are git-ignored. Keep them safe!"
 ```
 
-#### 1.2 Wykonanie skryptu
+#### 1.2 Running the script
 
 ```bash
 cd /home/decybell/dev/portfolio
@@ -309,7 +309,7 @@ chmod +x scripts/generate-k8s-secrets.sh
 ./scripts/generate-k8s-secrets.sh
 ```
 
-**Wynik:**
+**Result:**
 ```
 ✓ Secret generated for admin
 ✓ Secret generated for blog
@@ -320,22 +320,22 @@ chmod +x scripts/generate-k8s-secrets.sh
 All secrets generated!
 ```
 
-#### 1.3 Aktualizacja mysql.yaml z prawdziwymi hasłami
+#### 1.3 Updating mysql.yaml with real passwords
 
-**Problem:** Pliki `mysql.yaml` zawierały Secret definitions z placeholderami "CHANGE_ME", które nadpisywały poprawnie wygenerowane secrets przy każdym `kubectl apply`.
+**Problem:** The `mysql.yaml` files contained Secret definitions with "CHANGE_ME" placeholders that were overwriting properly generated secrets on every `kubectl apply`.
 
-**Rozwiązanie:** Aktualizacja mysql.yaml z prawdziwymi hasłami z secrets:
+**Solution:** Update mysql.yaml with real passwords from secrets:
 
 ```bash
 cd /home/decybell/dev/portfolio
 SERVICES=("admin" "blog" "sso" "users")
 
 for SERVICE in "${SERVICES[@]}"; do
-    # Pobierz hasło z secret
+    # Get password from secret
     DB_PASS=$(kubectl get secret ${SERVICE}-secret -n portfolio \
         -o jsonpath='{.data.DB_PASSWORD}' | base64 -d)
 
-    # Zamień CHANGE_ME w mysql.yaml
+    # Replace CHANGE_ME in mysql.yaml
     sed -i "s/MYSQL_PASSWORD: \"CHANGE_ME\"/MYSQL_PASSWORD: \"${DB_PASS}\"/g" \
         ${SERVICE}/k8s/mysql.yaml
     sed -i "s/MYSQL_ROOT_PASSWORD: \"CHANGE_ME\"/MYSQL_ROOT_PASSWORD: \"${DB_PASS}\"/g" \
@@ -345,7 +345,7 @@ for SERVICE in "${SERVICES[@]}"; do
 done
 ```
 
-### Krok 2: Generowanie TLS Certificates
+### Step 2: Generating TLS Certificates
 
 ```bash
 cd /home/decybell/dev/portfolio
@@ -387,53 +387,53 @@ kubectl create secret tls sso-tls \
 rm -f *-tls.key *-tls.crt
 ```
 
-### Krok 3: Konfiguracja DNS (/etc/hosts)
+### Step 3: DNS Configuration (/etc/hosts)
 
 ```bash
-# Pobierz IP Minikube
+# Get Minikube IP
 MINIKUBE_IP=$(minikube ip --profile=portfolio)
 echo "Minikube IP: ${MINIKUBE_IP}"
 # Output: 192.168.49.2
 
-# Dodaj wpisy do /etc/hosts
+# Add entries to /etc/hosts
 echo "${MINIKUBE_IP} admin.portfolio.kube" | sudo tee -a /etc/hosts
 echo "${MINIKUBE_IP} portfolio.kube" | sudo tee -a /etc/hosts
 echo "${MINIKUBE_IP} sso.portfolio.kube" | sudo tee -a /etc/hosts
 
-# Weryfikacja
+# Verification
 cat /etc/hosts | grep portfolio.kube
 ```
 
-### Krok 4: Załadowanie Docker Images do Minikube
+### Step 4: Loading Docker Images to Minikube
 
-**Uwaga:** Obrazy były już zbudowane lokalnie (ghcr.io/szymonborowski/microservices-*:v0.0.1)
+**Note:** Images were already built locally (ghcr.io/szymonborowski/microservices-*:v0.0.1)
 
 ```bash
 cd /home/decybell/dev/portfolio
 
-# Załaduj wszystkie obrazy do Minikube
+# Load all images to Minikube
 minikube image load ghcr.io/szymonborowski/microservices-admin:v0.0.1 --profile=portfolio
 minikube image load ghcr.io/szymonborowski/microservices-blog:v0.0.1 --profile=portfolio
 minikube image load ghcr.io/szymonborowski/microservices-frontend:v0.0.1 --profile=portfolio
 minikube image load ghcr.io/szymonborowski/microservices-sso:v0.0.1 --profile=portfolio
 minikube image load ghcr.io/szymonborowski/microservices-users:v0.0.1 --profile=portfolio
 
-# Weryfikacja
+# Verification
 minikube image ls --profile=portfolio | grep microservices
 ```
 
-### Krok 5: Deployment Namespace
+### Step 5: Namespace Deployment
 
 ```bash
 kubectl apply -f infra/k8s/namespace.yaml
 ```
 
-**Wynik:**
+**Result:**
 ```
 namespace/portfolio created
 ```
 
-### Krok 6: Deployment Secrets
+### Step 6: Secrets Deployment
 
 ```bash
 kubectl apply -f admin/k8s/secret.yaml
@@ -443,7 +443,7 @@ kubectl apply -f sso/k8s/secret.yaml
 kubectl apply -f users/k8s/secret.yaml
 ```
 
-**Wynik:**
+**Result:**
 ```
 secret/admin-secret created
 secret/blog-secret created
@@ -452,10 +452,10 @@ secret/sso-secret created
 secret/users-secret created
 ```
 
-### Krok 7: Deployment Baz Danych
+### Step 7: Database Deployment
 
 ```bash
-# Deploy StatefulSets dla MySQL
+# Deploy MySQL StatefulSets
 kubectl apply -f admin/k8s/mysql.yaml
 kubectl apply -f blog/k8s/mysql.yaml
 kubectl apply -f sso/k8s/mysql.yaml
@@ -467,7 +467,7 @@ kubectl apply -f frontend/k8s/redis.yaml
 # Deploy RabbitMQ
 kubectl apply -f infra/k8s/rabbitmq.yaml
 
-# Czekaj aż bazy będą gotowe
+# Wait for databases to be ready
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=admin-mysql \
   -n portfolio --timeout=300s
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=blog-mysql \
@@ -482,7 +482,7 @@ kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=rabbitmq \
   -n portfolio --timeout=300s
 ```
 
-**Wynik:**
+**Result:**
 ```
 statefulset.apps/admin-mysql created
 statefulset.apps/blog-mysql created
