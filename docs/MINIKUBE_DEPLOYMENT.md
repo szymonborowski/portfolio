@@ -199,6 +199,41 @@ kubectl get nodes
 # portfolio   Ready    control-plane   Xh    v1.35.0
 ```
 
+### Quick start after rebooting your machine
+
+If the cluster has already been created (i.e. you didn’t run `minikube delete`), most of the configuration lives in its etcd and survives host restarts. In that case you **do not** need to regenerate secrets or certificates – they are stored in the `portfolio` namespace and will be restored automatically.
+
+A typical daily workflow looks like this:
+
+1. restart the cluster:
+   ```bash
+   minikube start --profile=portfolio
+   ```
+   (you can reuse the same flags as shown earlier or wrap them in a script, e.g. `scripts/minikube-start.sh`).
+2. optionally load any newly built images if you’ve changed code:
+   ```bash
+   minikube image load ghcr.io/szymonborowski/microservices-frontend:v0.0.5 \
+     --profile=portfolio
+   ```
+   Images pulled from GHCR remain in the cluster until explicitly removed.
+3. check resource status:
+   ```bash
+   kubectl get pods,svc,ing -n portfolio
+   kubectl logs -f deployment/frontend -n portfolio
+   ```
+4. if you modified ingress rules or manifests, apply the changes
+   (e.g. `kubectl apply -f frontend/k8s/ingress.yaml`).
+5. ensure DNS/domains point at Minikube:
+   ```bash
+   sudo -- sh -c "echo "$(minikube ip --profile=portfolio) \
+   frontend.portfolio.kube sso.portfolio.kube admin.portfolio.kube" \
+   >> /etc/hosts"
+   ```
+
+> 🔄  To completely reset the environment, run `minikube delete --profile=portfolio` and follow the "Deployment Step‑by‑Step" section from the start.
+
+Secrets and certificates are generated once and live in the cluster. Repeat creation only on a fresh install, when keys change, or if resources are manually deleted.
+
 **Uzasadnienie zasobów:**
 - **4 CPU**: 5 aplikacji + 4 MySQL + Redis + RabbitMQ + system overhead
 - **8GB RAM**: Wymagane dla wszystkich podów + bufor

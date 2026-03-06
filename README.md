@@ -6,6 +6,11 @@ A blogging platform built with microservices architecture.
 
 ## Architecture
 
+> **Note:**  For full control you'll want to get comfortable with minikube commands, Ingress setup, and cluster management.  Spend some time tomorrow digging into starting/stopping clusters, port‑forwarding, ingress rules and ArgoCD operations — the CI/CD tooling builds images and updates manifests, but you still need to know how to run and manage the apps locally.
+>
+
+
+
 ```
                     ┌─────────────┐
                     │   Traefik   │
@@ -140,6 +145,42 @@ The production stack includes a full observability suite:
 ## Kubernetes
 
 Kubernetes manifests are available in each service repository under `k8s/` and in the infrastructure repository. See [docs/MINIKUBE_DEPLOYMENT.md](docs/MINIKUBE_DEPLOYMENT.md) for a complete local deployment guide.
+
+### Local development with Minikube
+
+The `docs/MINIKUBE_DEPLOYMENT.md` document contains a detailed step‑by‑step runbook, but the commands below will get you started quickly:
+
+```bash
+# start / stop / delete the cluster
+minikube start --profile=portfolio --driver=docker \
+  --cpus=4 --memory=8g --disk-size=40g \
+  --addons=ingress,metrics-server,dashboard
+minikube stop --profile=portfolio
+minikube delete --profile=portfolio  # tear down completely
+
+# inspect resources
+kubectl get nodes,pods,svc -n portfolio
+kubectl logs -f deployment/frontend -n portfolio
+
+# port‑forward a service for local testing
+kubectl port-forward svc/frontend 8080:80 -n portfolio
+
+# update or inspect ingress rules
+kubectl apply -f k8s/ingress.yaml
+kubectl describe ingress frontend -n portfolio
+
+# ArgoCD operations (if installed)
+argocd login localhost:8080
+argocd app list
+argocd app sync portfolio
+
+# make local domains resolve to Minikube
+echo "$(minikube ip --profile=portfolio) frontend.portfolio.kube sso.portfolio.kube admin.portfolio.kube" \
+  | sudo tee -a /etc/hosts
+```
+
+> ⚠️ On Linux you must add the `*.portfolio.kube` domains to `/etc/hosts` pointing at the Minikube IP. The full deployment guide includes troubleshooting tips and additional administrative commands.
+
 
 ## License
 
