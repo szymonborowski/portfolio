@@ -3,7 +3,7 @@
 > **Projekt:** Platforma blogowa w architekturze mikroserwisowej
 > **Stack:** Laravel 12 · PHP 8.5 · MySQL 8 · Redis · RabbitMQ · Docker · Kubernetes · Vue.js
 > **Serwisy:** Frontend, Blog, Users, SSO, Admin, Analytics, Infra
-> **Ostatnia aktualizacja:** 2026-02-12
+> **Ostatnia aktualizacja:** 2026-03-07
 
 ---
 
@@ -50,6 +50,18 @@
 - [x] Monitoring stack (Prometheus, Loki, Promtail, Grafana + dashboardy)
 - [x] Traefik TLS certificates, OCI labels, GHCR namespace
 
+### Faza 7 — Deployment, CI/CD i testy (28 luty – 7 marzec 2026)
+- [x] Production Docker Compose (docker-compose.prod.yml, deploy/nginx/, .env.prod.example)
+- [x] Repozytorium portfolio (zbiorczy deploy config na GitHub)
+- [x] Obrazy Docker zaktualizowane i wypchnięte do GHCR (v0.0.1–v0.0.4)
+- [x] Git tagi powiązane z wersjami obrazów Docker
+- [x] Testy RabbitMQ update event — naprawa failing testów w Users (store/destroyById)
+- [x] Testy ConsumeUserEvents — pokrycie komendy RabbitMQ consumer w Blog (UserEventsMessageHandler)
+- [x] Testy AuthorizationViewResponse — pokrycie klasy w SSO
+- [x] GitHub Actions CI/CD workflow (ci-cd.yml)
+- [x] ArgoCD Application manifesty (argocd-application.yaml)
+- [x] Skrypty: dev-up.sh (dev env), k8s-deploy.sh (Minikube + ArgoCD)
+
 ---
 
 ## TODO — otwarte zadania
@@ -63,7 +75,7 @@
 
 ### Blog
 
-- [ ] **Testy ConsumeUserEvents** — pokrycie komendy RabbitMQ consumer (obecnie 0%)
+- [x] **Testy ConsumeUserEvents** — pokrycie komendy RabbitMQ consumer (UserEventsMessageHandler)
 
 ### Admin
 
@@ -77,11 +89,11 @@
 
 ### SSO
 
-- [ ] **Testy AuthorizationViewResponse** — pokrycie klasy (obecnie 0%)
+- [x] **Testy AuthorizationViewResponse** — pokrycie klasy (3 testy jednostkowe)
 
 ### Users
 
-- [ ] **Testy RabbitMQ update event** — naprawa 2 failing testów (event dispatch przy update)
+- [x] **Testy RabbitMQ update event** — naprawiono (dodano store/destroyById, 5 testów passing)
 
 ### Infra — Docker Compose
 
@@ -99,8 +111,8 @@
 
 ### CI/CD
 
-- [ ] **GitHub Actions CI** — lint, testy, budowa obrazu Docker przy push/PR
-- [ ] **GitHub Actions CD** — push do ghcr.io, aktualizacja tagu w K8s Deployment, apply do klastra
+- [x] **GitHub Actions CI** — testy, budowa obrazu Docker przy push/PR (ci-cd.yml)
+- [x] **GitHub Actions CD** — push do ghcr.io, aktualizacja tagu w K8s Deployment (ArgoCD)
 - [ ] **Konwencja nazw obrazów** — `ghcr.io/szymonborowski/portfolio-{service}:{tag}` (SHA/semver, unikać :latest)
 - [ ] **Strategia migracji DB** — K8s Job lub init container przed rollout
 
@@ -132,9 +144,9 @@
 
 | Serwis | Linie | Testy | Priorytetowe braki |
 |--------|-------|-------|--------------------|
-| Users | 87.8% | 49 | RabbitMQ update event (2 failing) |
-| SSO | 83.7% | 22 | AuthorizationViewResponse (0%) |
-| Blog | 80.1% | 98 | ConsumeUserEvents (0%) |
+| Users | 87.8% | 54 | — (fixed) |
+| SSO | 83.7% | 25 | — (fixed) |
+| Blog | 80.1% | 104 | — (fixed) |
 | Admin | 73.0% | 28 | — |
 | Frontend | 61.4% | 46 | HomeController (~0%) |
 | Analytics | — | — | brak testów |
