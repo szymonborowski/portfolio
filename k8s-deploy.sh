@@ -10,7 +10,7 @@ set -e
 
 SERVICES=(admin blog frontend sso users analytics)
 IMAGE_REGISTRY="portfolio"  # Local minikube registry prefix
-NAMESPACE="microservices"
+NAMESPACE="portfolio"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -42,8 +42,8 @@ check_minikube() {
         return 1
     fi
     
-    status=$(minikube status 2>/dev/null | grep -c "Running" || echo "0")
-    if [ "$status" -eq 0 ]; then
+    status=$(minikube status 2>/dev/null | grep -c "Running" 2>/dev/null) || status=0
+    if [ "${status:-0}" -eq 0 ]; then
         log_error "minikube is not running"
         log_info "Run: minikube start"
         return 1
@@ -118,12 +118,35 @@ update_manifests() {
     done
 }
 
+apply_manifests() {
+    log_info "Ensuring namespace and deployments exist..."
+    
+    # Create namespace if it doesn't exist
+    if ! kubectl get namespace "$NAMESPACE" &>/dev/null; then
+        log_info "Creating namespace $NAMESPACE..."
+        kubectl create namespace "$NAMESPACE"
+        log_success "Namespace $NAMESPACE created"
+    fi
+    
+    # Apply deployment manifests (may fail if secrets/configmaps not yet applied)
+    for service in "${SERVICES[@]}"; do
+        DEPLOY_FILE="$service/k8s/deployment.yaml"
+        if [ -f "$DEPLOY_FILE" ]; then
+            if kubectl apply -f "$DEPLOY_FILE"; then
+                log_success "Applied $DEPLOY_FILE"
+            else
+                log_warning "Could not apply $DEPLOY_FILE (secrets/configmaps may be missing - see docs/MINIKUBE_DEPLOYMENT.md)"
+            fi
+        fi
+    done
+}
+
 sync_argocd() {
     log_info "Syncing ArgoCD applications..."
     
     # Check if ArgoCD is available
-    argocd_pods=$(kubectl get pods -n argocd 2>/dev/null | grep -c "Running" || echo "0")
-    if [ "$argocd_pods" -eq 0 ]; then
+    argocd_pods=$(kubectl get pods -n argocd 2>/dev/null | grep -c "Running" 2>/dev/null) || argocd_pods=0
+    if [ "${argocd_pods:-0}" -eq 0 ]; then
         log_warning "ArgoCD pods not running in argocd namespace"
         log_info "Proceeding without ArgoCD sync..."
         return 0
@@ -140,12 +163,12 @@ sync_argocd() {
     
     log_info "Triggering manual sync in ArgoCD..."
     
-    # Sync each application
+    # Sync each application (deployment names: admin-app, blog-app, etc.)
     for service in "${SERVICES[@]}"; do
-        app_name="portfolio-${service}"
-        log_info "Syncing $app_name..."
+        deployment="${service}-app"
+        log_info "Syncing portfolio-${service} (deployment/${deployment})..."
         
-        kubectl rollout restart deployment/$service -n $NAMESPACE 2>/dev/null || log_warning "Could not restart deployment/$service"
+        kubectl rollout restart deployment/$deployment -n $NAMESPACE 2>/dev/null || log_warning "Could not restart deployment/$deployment"
     done
     
     log_success "ArgoCD applications triggered for sync"
@@ -193,6 +216,7 @@ main() {
             setup_docker_env
             build_images
             update_manifests
+            apply_manifests
             ;;
         sync)
             sync_argocd
@@ -204,6 +228,7 @@ main() {
             setup_docker_env
             build_images
             update_manifests
+            apply_manifests
             sync_argocd
             check_deployments
             show_urls

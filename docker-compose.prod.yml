@@ -11,7 +11,6 @@ services:
 
   traefik:
     image: traefik:v3.6
-    container_name: traefik
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -59,7 +58,6 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
-    container_name: rabbitmq
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
@@ -84,7 +82,6 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.51.0
-    container_name: prometheus
     restart: unless-stopped
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -111,7 +108,6 @@ services:
 
   loki:
     image: grafana/loki:3.0.0
-    container_name: loki
     restart: unless-stopped
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
@@ -128,7 +124,6 @@ services:
 
   promtail:
     image: grafana/promtail:3.0.0
-    container_name: promtail
     restart: unless-stopped
     command: -config.file=/etc/promtail/config.yaml
     volumes:
@@ -142,7 +137,6 @@ services:
 
   grafana:
     image: grafana/grafana:10.4.0
-    container_name: grafana
     restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
@@ -177,7 +171,6 @@ services:
 
   frontend-app:
     image: ${FRONTEND_IMAGE}
-    container_name: frontend-app
     restart: unless-stopped
     environment:
       APP_NAME: ${FRONTEND_APP_NAME}
@@ -209,7 +202,6 @@ services:
 
   frontend-nginx:
     image: nginx:1.27-alpine
-    container_name: frontend-nginx
     restart: unless-stopped
     volumes:
       - frontend_public:/var/www/html/public:ro
@@ -235,7 +227,6 @@ services:
 
   frontend-redis:
     image: redis:7-alpine
-    container_name: frontend-redis
     restart: unless-stopped
     command: redis-server --appendonly yes
     volumes:
@@ -251,7 +242,6 @@ services:
 
   frontend-db:
     image: mysql:8
-    container_name: frontend-db
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${FRONTEND_DB_DATABASE}
@@ -275,7 +265,6 @@ services:
 
   sso-app:
     image: ${SSO_IMAGE}
-    container_name: sso-app
     restart: unless-stopped
     environment:
       APP_NAME: ${SSO_APP_NAME}
@@ -302,7 +291,6 @@ services:
 
   sso-nginx:
     image: nginx:1.27-alpine
-    container_name: sso-nginx
     restart: unless-stopped
     volumes:
       - sso_public:/var/www/html/public:ro
@@ -329,7 +317,6 @@ services:
 
   sso-db:
     image: mysql:8
-    container_name: sso-db
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${SSO_DB_DATABASE}
@@ -353,7 +340,6 @@ services:
 
   admin-app:
     image: ${ADMIN_IMAGE}
-    container_name: admin-app
     restart: unless-stopped
     environment:
       APP_NAME: ${ADMIN_APP_NAME}
@@ -387,7 +373,6 @@ services:
 
   admin-nginx:
     image: nginx:1.27-alpine
-    container_name: admin-nginx
     restart: unless-stopped
     volumes:
       - admin_public:/var/www/html/public:ro
@@ -413,7 +398,6 @@ services:
 
   admin-db:
     image: mysql:8
-    container_name: admin-db
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${ADMIN_DB_DATABASE}
@@ -437,7 +421,6 @@ services:
 
   users-app:
     image: ${USERS_IMAGE}
-    container_name: users-app
     restart: unless-stopped
     environment:
       APP_NAME: ${USERS_APP_NAME}
@@ -468,7 +451,6 @@ services:
 
   users-nginx:
     image: nginx:1.27-alpine
-    container_name: users-nginx
     restart: unless-stopped
     volumes:
       - users_public:/var/www/html/public:ro
@@ -495,7 +477,6 @@ services:
 
   users-db:
     image: mysql:8
-    container_name: users-db
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${USERS_DB_DATABASE}
@@ -519,7 +500,6 @@ services:
 
   blog-app:
     image: ${BLOG_IMAGE}
-    container_name: blog-app
     restart: unless-stopped
     environment:
       APP_NAME: ${BLOG_APP_NAME}
@@ -550,7 +530,6 @@ services:
 
   blog-nginx:
     image: nginx:1.27-alpine
-    container_name: blog-nginx
     restart: unless-stopped
     volumes:
       - blog_public:/var/www/html/public:ro
@@ -577,7 +556,6 @@ services:
 
   blog-consumer:
     image: ${BLOG_IMAGE}
-    container_name: blog-consumer
     restart: unless-stopped
     command: php artisan rabbitmq:consume-users
     environment:
@@ -606,7 +584,6 @@ services:
 
   blog-db:
     image: mysql:8
-    container_name: blog-db
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${BLOG_DB_DATABASE}
@@ -630,7 +607,6 @@ services:
 
   analytics-app:
     image: ${ANALYTICS_IMAGE}
-    container_name: analytics-app
     restart: unless-stopped
     environment:
       APP_ENV: production
@@ -659,7 +635,6 @@ services:
 
   analytics-nginx:
     image: nginx:1.27-alpine
-    container_name: analytics-nginx
     restart: unless-stopped
     volumes:
       - analytics_public:/var/www/html/public:ro
@@ -679,7 +654,6 @@ services:
 
   analytics-consumer:
     image: ${ANALYTICS_IMAGE}
-    container_name: analytics-consumer
     restart: unless-stopped
     command: php artisan rabbitmq:consume-views
     environment:
@@ -707,7 +681,6 @@ services:
 
   analytics-db:
     image: mysql:8
-    container_name: analytics-db
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${ANALYTICS_DB_DATABASE}
