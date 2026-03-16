@@ -4,10 +4,11 @@ set -euo pipefail
 
 COMMAND="${1:-}"
 
-if [[ "$COMMAND" != "up" && "$COMMAND" != "down" ]]; then
+if [[ "$COMMAND" != "up" && "$COMMAND" != "down" && "$COMMAND" != "build" ]]; then
   echo "Usage:"
-  echo "  ./docker-compose.dev.sh up [-d] [services...]"
-  echo "  ./docker-compose.dev.sh down [services...]"
+  echo "  ./dev.sh up [-d] [services...]"
+  echo "  ./dev.sh down [services...]"
+  echo "  ./dev.sh build [services...]"
   exit 1
 fi
 
@@ -27,7 +28,7 @@ ALL_SERVICES=(
   sso
   blog
   users
-  analitics
+  analytics
 )
 
 SELECTED_SERVICES=("$@")
@@ -63,11 +64,11 @@ for service in "${SERVICES[@]}"; do
   echo "➡️  $COMMAND :: $service"
   (
     cd "$service"
-    if [[ "$COMMAND" == "up" ]]; then
-      docker compose up $DETACHED
-    else
-      docker compose down
-    fi
+    case "$COMMAND" in
+      up)    docker compose up $DETACHED ;;
+      down)  docker compose down ;;
+      build) docker compose build ;;
+    esac
   )
   echo "✅ done :: $service"
   echo

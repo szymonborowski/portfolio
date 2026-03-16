@@ -140,6 +140,13 @@ setup_hosts() {
 }
 
 # -----------------------------------------------------------------------------
+create_networks() {
+  info "Creating Docker networks..."
+  docker network create "${NETWORK_NAME:-web}" 2>/dev/null && success "Created network: ${NETWORK_NAME:-web}" || warn "Network ${NETWORK_NAME:-web} already exists – skipping."
+  docker network create microservices 2>/dev/null && success "Created network: microservices" || warn "Network microservices already exists – skipping."
+}
+
+# -----------------------------------------------------------------------------
 main() {
   echo ""
   echo "  Portfolio – local dev setup"
@@ -151,6 +158,7 @@ main() {
   setup_env_files
   generate_certs
   setup_hosts
+  create_networks
 
   echo ""
   success "Setup complete!"
