@@ -350,7 +350,7 @@ SSO nie ma własnej bazy użytkowników — deleguje weryfikację do Users API p
 ```php
 // SSO AuthController
 $response = Http::withHeaders([
-    'X-Internal-Api-Key' => config(''services.users.internal_key''),
+    ''X-Internal-Api-Key'' => config(''services.users.internal_key''),
 ])->post(config(''services.users.url'') . ''/api/internal/verify-password'', [
     ''email'' => $request->email,
     ''password'' => $request->password,
