@@ -90,6 +90,7 @@
 ### SSO
 
 - [x] **Testy AuthorizationViewResponse** — pokrycie klasy (3 testy jednostkowe)
+- [ ] **Checkbox "Zapamiętaj mnie" na stronie logowania** — obsługa opcji na stronie login SSO (dłuższa ważność sesji/tokenu)
 
 ### Users
 
