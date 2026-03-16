@@ -3,6 +3,7 @@ name: CI/CD
 on:
   push:
     branches: [ master ]
+    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ master ]
 
@@ -27,6 +28,21 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
+
+      - name: Compute image tags
+        id: meta
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/portfolio-${{ matrix.service }}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          TAGS="${IMAGE}:sha-${SHORT_SHA}"
+          # On semver tag push (v1.2.3) also tag with the version
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF##*/}"
+            TAGS="${TAGS},${IMAGE}:${VERSION}"
+          fi
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "sha_tag=${IMAGE}:sha-${SHORT_SHA}" >> $GITHUB_OUTPUT
 
       - name: Check for Dockerfile
         id: dockerfile
@@ -63,17 +79,17 @@ jobs:
         with:
           context: .
           file: ${{ steps.dockerfile.outputs.path }}
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:latest
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Update deployment manifest for ArgoCD
         if: steps.dockerfile.outputs.found == 'true' && github.ref == 'refs/heads/master' && github.event_name == 'push'
         env:
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-          IMAGE_TAG: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:${{ github.sha }}
+          IMAGE_TAG: ${{ steps.meta.outputs.sha_tag }}
         run: |
           set -e
           git config user.name "$GIT_AUTHOR_NAME"
@@ -81,7 +97,7 @@ jobs:
           DEPLOY_FILE="${{ matrix.service }}/k8s/deployment.yaml"
           if [ -f "$DEPLOY_FILE" ]; then
             sed -E -i "s#(image:\s*)ghcr.io[^/]*/[^ ]*#\1${IMAGE_TAG}#" "$DEPLOY_FILE" || true
-            if git diff --exits-code "$DEPLOY_FILE" > /dev/null 2>&1; then
+            if git diff --exit-code "$DEPLOY_FILE" > /dev/null 2>&1; then
               echo "No changes in $DEPLOY_FILE, skipping commit"
             else
               git add "$DEPLOY_FILE"
@@ -93,4 +109,4 @@ jobs:
           fi
 
       - name: Notify (done)
-        run: echo "✓ Finished build for ${{ matrix.service }} → ${IMAGE_TAG:-none}"
+        run: echo "✓ Finished build for ${{ matrix.service }} → ${{ steps.meta.outputs.sha_tag }}"
