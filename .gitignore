@@ -1,0 +1,31 @@
+# Service repositories (managed as separate git repos)
+admin/
+analytics/
+blog/
+frontend/
+infra/
+sso/
+users/
+
+# Environment files with secrets
+.env.prod
+.env
+
+# IDE / editor
+.idea/
+.vscode/
+.cursor/
+*.code-workspace
+
+# AI assistants
+.claude/
+claude.md
+.mcp.json
+
+# Personal notes
+me.md
+good_practises.md
+
+# OS
+.DS_Store
+Thumbs.db
