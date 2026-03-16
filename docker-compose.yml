@@ -1,0 +1,14 @@
+include:
+  - path: infra/docker-compose.yml
+  - path: frontend/docker-compose.yml
+  - path: sso/docker-compose.yml
+  - path: admin/docker-compose.yml
+  - path: users/docker-compose.yml
+  - path: blog/docker-compose.yml
+  - path: analytics/docker-compose.yml
+
+networks:
+  web:
+    driver: bridge
+  microservices:
+    driver: bridge
