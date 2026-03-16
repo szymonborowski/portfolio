@@ -170,7 +170,7 @@ services:
   # ===========================================================================
 
   frontend-app:
-    image: ${FRONTEND_IMAGE}
+    image: ghcr.io/szymonborowski/portfolio-frontend:latest
     restart: unless-stopped
     environment:
       APP_NAME: ${FRONTEND_APP_NAME}
@@ -275,7 +275,7 @@ services:
   # ===========================================================================
 
   sso-app:
-    image: ${SSO_IMAGE}
+    image: ghcr.io/szymonborowski/portfolio-sso:latest
     restart: unless-stopped
     environment:
       APP_NAME: ${SSO_APP_NAME}
@@ -352,7 +352,7 @@ services:
   # ===========================================================================
 
   admin-app:
-    image: ${ADMIN_IMAGE}
+    image: ghcr.io/szymonborowski/portfolio-admin:latest
     restart: unless-stopped
     environment:
       APP_NAME: ${ADMIN_APP_NAME}
@@ -433,7 +433,7 @@ services:
   # ===========================================================================
 
   users-app:
-    image: ${USERS_IMAGE}
+    image: ghcr.io/szymonborowski/portfolio-users:latest
     restart: unless-stopped
     environment:
       APP_NAME: ${USERS_APP_NAME}
@@ -513,7 +513,7 @@ services:
   # ===========================================================================
 
   blog-app:
-    image: ${BLOG_IMAGE}
+    image: ghcr.io/szymonborowski/portfolio-blog:latest
     restart: unless-stopped
     environment:
       APP_NAME: ${BLOG_APP_NAME}
@@ -569,7 +569,7 @@ services:
       - microservices
 
   blog-consumer:
-    image: ${BLOG_IMAGE}
+    image: ghcr.io/szymonborowski/portfolio-blog:latest
     restart: unless-stopped
     command: php artisan rabbitmq:consume-users
     environment:
@@ -620,7 +620,7 @@ services:
   # ===========================================================================
 
   analytics-app:
-    image: ${ANALYTICS_IMAGE}
+    image: ghcr.io/szymonborowski/portfolio-analytics:latest
     restart: unless-stopped
     environment:
       APP_ENV: production
@@ -667,7 +667,7 @@ services:
       - microservices
 
   analytics-consumer:
-    image: ${ANALYTICS_IMAGE}
+    image: ghcr.io/szymonborowski/portfolio-analytics:latest
     restart: unless-stopped
     command: php artisan rabbitmq:consume-views
     environment:
