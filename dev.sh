@@ -2,30 +2,37 @@
 
 set -euo pipefail
 
-COMMAND="${1:-}"
+# Args before '--' go to docker compose; args after '--' select subdirectories.
+# Example: ./dev.sh up -d --build -- admin blog
+DC_ARGS=()
+SELECTED_SERVICES=()
+FOUND_SEP=false
 
-if [[ "$COMMAND" != "up" && "$COMMAND" != "down" && "$COMMAND" != "build" ]]; then
+for arg in "$@"; do
+  if [[ "$arg" == "--" ]]; then
+    FOUND_SEP=true
+    continue
+  fi
+  if $FOUND_SEP; then
+    SELECTED_SERVICES+=("$arg")
+  else
+    DC_ARGS+=("$arg")
+  fi
+done
+
+if [[ ${#DC_ARGS[@]} -eq 0 ]]; then
   echo "Usage:"
-  echo "  ./dev.sh up [-d] [--build] [services...]"
-  echo "  ./dev.sh down [services...]"
-  echo "  ./dev.sh build [services...]"
+  echo "  ./dev.sh DOCKER_COMPOSE_ARGS... [-- SERVICE...]"
+  echo ""
+  echo "Examples:"
+  echo "  ./dev.sh up -d --build"
+  echo "  ./dev.sh down -- admin blog"
+  echo "  ./dev.sh logs -f -- blog"
+  echo "  ./dev.sh ps"
+  echo "  ./dev.sh restart -- infra"
   exit 1
 fi
 
-shift || true
-
-DETACHED=""
-BUILD=""
-while [[ "${1:-}" == -* ]]; do
-  case "${1}" in
-    -d)       DETACHED="--detach" ;;
-    --build)  BUILD="--build" ;;
-    *)        echo "⚠️ Unknown flag: $1" ;;
-  esac
-  shift
-done
-
-# 🔥 statyczna lista (infra first)
 ALL_SERVICES=(
   infra
   admin
@@ -36,15 +43,13 @@ ALL_SERVICES=(
   analytics
 )
 
-SELECTED_SERVICES=("$@")
-
 if [[ ${#SELECTED_SERVICES[@]} -gt 0 ]]; then
   SERVICES=()
   for s in "${SELECTED_SERVICES[@]}"; do
     if printf '%s\n' "${ALL_SERVICES[@]}" | grep -qx "$s"; then
       SERVICES+=("$s")
     else
-      echo "⚠️ Service '$s' not in static list"
+      echo "⚠️  Service '$s' not in list, skipping"
     fi
   done
 else
@@ -56,24 +61,20 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
   exit 1
 fi
 
-echo "🚀 docker compose $COMMAND $DETACHED $BUILD"
+echo "🚀 docker compose ${DC_ARGS[*]}"
 echo "📦 Services: ${SERVICES[*]}"
 echo
 
 for service in "${SERVICES[@]}"; do
   if [[ ! -d "$service" ]]; then
-    echo "⚠️ Directory $service not found"
+    echo "⚠️  Directory '$service' not found, skipping"
     continue
   fi
 
-  echo "➡️  $COMMAND :: $service"
+  echo "➡️  $service"
   (
     cd "$service"
-    case "$COMMAND" in
-      up)    docker compose up $DETACHED $BUILD ;;
-      down)  docker compose down ;;
-      build) docker compose build ;;
-    esac
+    docker compose "${DC_ARGS[@]}"
   )
   echo "✅ done :: $service"
   echo
