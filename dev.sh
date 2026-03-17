@@ -6,7 +6,7 @@ COMMAND="${1:-}"
 
 if [[ "$COMMAND" != "up" && "$COMMAND" != "down" && "$COMMAND" != "build" ]]; then
   echo "Usage:"
-  echo "  ./dev.sh up [-d] [services...]"
+  echo "  ./dev.sh up [-d] [--build] [services...]"
   echo "  ./dev.sh down [services...]"
   echo "  ./dev.sh build [services...]"
   exit 1
@@ -15,10 +15,15 @@ fi
 shift || true
 
 DETACHED=""
-if [[ "${1:-}" == "-d" ]]; then
-  DETACHED="-d"
+BUILD=""
+while [[ "${1:-}" == -* ]]; do
+  case "${1}" in
+    -d)       DETACHED="--detach" ;;
+    --build)  BUILD="--build" ;;
+    *)        echo "⚠️ Unknown flag: $1" ;;
+  esac
   shift
-fi
+done
 
 # 🔥 statyczna lista (infra first)
 ALL_SERVICES=(
@@ -51,7 +56,7 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
   exit 1
 fi
 
-echo "🚀 docker compose $COMMAND $DETACHED"
+echo "🚀 docker compose $COMMAND $DETACHED $BUILD"
 echo "📦 Services: ${SERVICES[*]}"
 echo
 
@@ -65,7 +70,7 @@ for service in "${SERVICES[@]}"; do
   (
     cd "$service"
     case "$COMMAND" in
-      up)    docker compose up $DETACHED ;;
+      up)    docker compose up $DETACHED $BUILD ;;
       down)  docker compose down ;;
       build) docker compose build ;;
     esac
