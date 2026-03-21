@@ -151,6 +151,54 @@ setup_env_files() {
 }
 
 # -----------------------------------------------------------------------------
+# inject KEY=VALUE into a file, replacing any existing value
+env_set() { local f="$1" k="$2" v="$3"; [ -f "$f" ] && sed -i "s|^${k}=.*|${k}=${v}|" "$f"; }
+
+generate_secrets() {
+  info "Generating secrets..."
+  cd "$ROOT_DIR"
+
+  local rabbitmq_pass sso_secret users_key analytics_key
+  rabbitmq_pass=$(openssl rand -hex 16)
+  sso_secret=$(openssl rand -hex 32)
+  users_key=$(openssl rand -hex 32)
+  analytics_key=$(openssl rand -hex 32)
+
+  # RabbitMQ — shared password across all services
+  env_set infra/.env     RABBITMQ_PASS     "$rabbitmq_pass"
+  env_set infra/.env     RABBITMQ_USER     "admin"
+  for svc in blog frontend users analytics; do
+    env_set "${svc}/.env" RABBITMQ_PASSWORD "$rabbitmq_pass"
+    env_set "${svc}/.env" RABBITMQ_USER     "admin"
+  done
+
+  # DB passwords — unique per service
+  for svc in blog frontend sso admin users analytics; do
+    [ -f "${svc}/.env" ] || continue
+    env_set "${svc}/.env" DB_PASSWORD      "$(openssl rand -hex 16)"
+    env_set "${svc}/.env" DB_ROOT_PASSWORD "$(openssl rand -hex 16)"
+  done
+
+  # SSO client secret — same value in frontend and admin
+  env_set frontend/.env SSO_CLIENT_SECRET "$sso_secret"
+  env_set admin/.env    SSO_CLIENT_SECRET "$sso_secret"
+
+  # Users internal API key
+  env_set frontend/.env USERS_INTERNAL_API_KEY "$users_key"
+  env_set admin/.env    USERS_SERVICE_API_KEY   "$users_key"
+
+  # Analytics internal API key
+  env_set frontend/.env  ANALYTICS_INTERNAL_API_KEY "$analytics_key"
+  env_set admin/.env     ANALYTICS_INTERNAL_API_KEY "$analytics_key"
+  env_set analytics/.env INTERNAL_API_KEY            "$analytics_key"
+
+  # Laravel APP_KEY (admin only — others use artisan key:generate at boot)
+  env_set admin/.env APP_KEY "base64:$(openssl rand -base64 32)"
+
+  success "Secrets generated."
+}
+
+# -----------------------------------------------------------------------------
 generate_certs() {
   info "Generating TLS certificates with mkcert..."
   cd "$ROOT_DIR"
@@ -203,6 +251,7 @@ main() {
   check_requirements
   clone_services
   setup_env_files
+  generate_secrets
   generate_certs
   setup_hosts
   create_networks
@@ -211,8 +260,7 @@ main() {
   success "Setup complete!"
   echo ""
   echo "  Next steps:"
-  echo "  1. Review and fill in secrets in each service's .env file"
-  echo "  2. Run: docker compose up -d"
+  echo "  1. Run: ./dev.sh up -d"
   echo ""
 }
 

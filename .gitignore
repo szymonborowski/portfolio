@@ -30,3 +30,10 @@ good_practises.md
 .DS_Store
 Thumbs.db
 TODO.md
+
+
+COMMITS.md
+
+# Kubernetes scripts (not yet production-ready)
+scripts/k8s-deploy.sh
+scripts/k8s-seed.sh

@@ -2,7 +2,7 @@
 
 A blogging platform built as a portfolio project to demonstrate microservices architecture with Laravel, Docker and Kubernetes.
 
-**Stack:** Laravel 12 · PHP 8.5 · MySQL 8 · Redis · RabbitMQ · Docker · Kubernetes · Traefik · FilamentPHP · Vue.js
+**Stack:** Laravel 12 · PHP 8.5 · MySQL 8 · Redis · RabbitMQ · Docker · Kubernetes · Traefik · FilamentPHP · Prometheus · Grafana · Loki
 
 **Live:** [borowski.services](https://borowski.services)
 
@@ -62,9 +62,10 @@ The script bootstraps the full local environment:
 
 1. Clones all microservice repositories into subdirectories
 2. Creates `.env` files from `.env.example` for each service (with UID/GID injected)
-3. Generates TLS certificates via `mkcert` for all local domains
-4. Adds domains to `/etc/hosts`
-5. Creates required Docker networks
+3. Generates and injects secrets: DB passwords, RabbitMQ, SSO client secret, internal API keys, APP_KEY
+4. Generates TLS certificates via `mkcert` for all local domains
+5. Adds domains to `/etc/hosts`
+6. Creates required Docker networks
 
 ```text
 Options:
@@ -74,10 +75,10 @@ Options:
   -h, --help            Show help
 ```
 
-After setup, review secrets in each service's `.env`, then start all services:
+After setup, start all services:
 
 ```bash
-docker compose up -d
+./dev.sh up -d
 ```
 
 ### Local Domains
@@ -103,23 +104,12 @@ cp .env.prod.example .env.prod
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
 
-## Kubernetes
-
-Manifests are in each service's repository under `k8s/`. The live cluster runs on OVH Managed Kubernetes with cert-manager and Let's Encrypt.
-
-```bash
-./scripts/k8s-deploy.sh       # deploy all services
-./scripts/k8s-seed.sh         # seed databases (run once after first deploy)
-kubectl get pods -n portfolio
-```
-
 ## Project Structure
 
 ```
 portfolio/
 ├── install.sh                  # Local dev setup script
-├── dev.sh                      # Helper for running docker compose subsets
-├── docker-compose.yml          # Root compose (includes all services)
+├── dev.sh                      # Helper for running docker compose per service
 ├── docker-compose.prod.yml     # Production compose
 ├── .env.prod.example           # Production environment template
 ├── infra/                      # Traefik config, TLS certs, dynamic routing
