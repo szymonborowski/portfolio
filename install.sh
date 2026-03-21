@@ -5,9 +5,58 @@ set -euo pipefail
 # Portfolio – local development setup
 # =============================================================================
 # Requirements: git, docker, docker compose v2, mkcert
-# Usage: ./install.sh
+# Usage: ./install.sh [--domain <domain>] [--repo-base <url>] [--network <name>]
+#
+# Options:
+#   --domain    Base domain for local TLS and /etc/hosts  (default: microservices.local)
+#   --repo-base Git base URL for cloning services         (default: git@github.com:szymonborowski)
+#   --network   External Docker network name              (default: web)
+#   -h, --help  Show this help message and exit
 
+DOMAIN="microservices.local"
 REPO_BASE="git@github.com:szymonborowski"
+NETWORK_NAME="${NETWORK_NAME:-web}"
+
+# --- parse args ---------------------------------------------------------------
+usage() {
+  cat <<EOF
+Portfolio – local development setup script
+
+Bootstraps a full local dev environment: clones microservice repositories,
+generates TLS certificates via mkcert, updates /etc/hosts, and creates
+required Docker networks.
+
+Usage:
+  ./install.sh [OPTIONS]
+
+Options:
+  --domain <domain>     Base domain for TLS certs and /etc/hosts
+                        (default: microservices.local)
+  --repo-base <url>     Git base URL used for cloning services
+                        (default: git@github.com:szymonborowski)
+  --network <name>      External Docker network name
+                        (default: web)
+  -h, --help            Show this help message and exit
+
+Requirements:
+  git, docker, docker compose v2, mkcert
+
+Examples:
+  ./install.sh
+  ./install.sh --domain myapp.local
+  ./install.sh --domain myapp.local --repo-base git@github.com:otheruser
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --domain)    DOMAIN="$2";       shift 2 ;;
+    --repo-base) REPO_BASE="$2";    shift 2 ;;
+    --network)   NETWORK_NAME="$2"; shift 2 ;;
+    -h|--help)   usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
 
 SERVICES=(
   "frontend:frontend_service"
@@ -17,8 +66,6 @@ SERVICES=(
   "blog:blog_service"
   "analytics:analytics_service"
 )
-
-DOMAIN="microservices.local"
 
 SUBDOMAINS=(
   "frontend"
@@ -129,20 +176,20 @@ setup_hosts() {
     hosts_entry="$hosts_entry $domain"
   done
 
-  if grep -q "microservices.local" /etc/hosts; then
-    warn "/etc/hosts already contains microservices.local entries – skipping."
+  if grep -q "$DOMAIN" /etc/hosts; then
+    warn "/etc/hosts already contains $DOMAIN entries – skipping."
     warn "To update manually, add the following line to /etc/hosts:"
     echo "  $hosts_entry"
   else
     echo "$hosts_entry" | sudo tee -a /etc/hosts > /dev/null
-    success "Added microservices.local entries to /etc/hosts."
+    success "Added $DOMAIN entries to /etc/hosts."
   fi
 }
 
 # -----------------------------------------------------------------------------
 create_networks() {
   info "Creating Docker networks..."
-  docker network create "${NETWORK_NAME:-web}" 2>/dev/null && success "Created network: ${NETWORK_NAME:-web}" || warn "Network ${NETWORK_NAME:-web} already exists – skipping."
+  docker network create "$NETWORK_NAME" 2>/dev/null && success "Created network: $NETWORK_NAME" || warn "Network $NETWORK_NAME already exists – skipping."
   docker network create microservices 2>/dev/null && success "Created network: microservices" || warn "Network microservices already exists – skipping."
 }
 
