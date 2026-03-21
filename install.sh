@@ -9,12 +9,12 @@ set -euo pipefail
 #
 # Options:
 #   --domain    Base domain for local TLS and /etc/hosts  (default: microservices.local)
-#   --repo-base Git base URL for cloning services         (default: git@github.com:szymonborowski)
+#   --repo-base Git base URL for cloning services         (default: https://github.com/szymonborowski)
 #   --network   External Docker network name              (default: web)
 #   -h, --help  Show this help message and exit
 
 DOMAIN="microservices.local"
-REPO_BASE="git@github.com:szymonborowski"
+REPO_BASE="https://github.com/szymonborowski"
 NETWORK_NAME="${NETWORK_NAME:-web}"
 
 # --- parse args ---------------------------------------------------------------
@@ -33,7 +33,7 @@ Options:
   --domain <domain>     Base domain for TLS certs and /etc/hosts
                         (default: microservices.local)
   --repo-base <url>     Git base URL used for cloning services
-                        (default: git@github.com:szymonborowski)
+                        (default: https://github.com/szymonborowski)
   --network <name>      External Docker network name
                         (default: web)
   -h, --help            Show this help message and exit
@@ -53,6 +53,7 @@ while [[ $# -gt 0 ]]; do
     --domain)    DOMAIN="$2";       shift 2 ;;
     --repo-base) REPO_BASE="$2";    shift 2 ;;
     --network)   NETWORK_NAME="$2"; shift 2 ;;
+    --https)     REPO_BASE="https://github.com/szymonborowski"; shift ;;
     -h|--help)   usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
