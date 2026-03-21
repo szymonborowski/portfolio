@@ -60,6 +60,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 SERVICES=(
+  "infra:infrastructure_service"
   "frontend:frontend_service"
   "sso:sso_service"
   "admin:admin_service"
@@ -137,25 +138,17 @@ setup_env_files() {
   info "Setting up .env files..."
   cd "$ROOT_DIR"
 
-  # infra
-  if [ ! -f "infra/.env" ]; then
-    cp infra/.env.example infra/.env
-    sed -i "s|traefik\.microservices\.local|traefik.${DOMAIN}|" infra/.env
-    sed -i "s|prometheus\.microservices\.local|prometheus.${DOMAIN}|" infra/.env
-    sed -i "s|grafana\.microservices\.local|grafana.${DOMAIN}|" infra/.env
-    success "Created infra/.env"
-  else
-    warn "infra/.env already exists – skipping."
-  fi
-
-  # microservices
   for entry in "${SERVICES[@]}"; do
     dir="${entry%%:*}"
     if [ ! -f "$dir/.env" ]; then
       cp "$dir/.env.example" "$dir/.env"
-      # inject UID/GID for volume permissions
       sed -i "s/^UID=.*/UID=$(id -u)/" "$dir/.env"
       sed -i "s/^GID=.*/GID=$(id -g)/" "$dir/.env"
+      if [[ "$dir" == "infra" ]]; then
+        sed -i "s|traefik\.microservices\.local|traefik.${DOMAIN}|" "$dir/.env"
+        sed -i "s|prometheus\.microservices\.local|prometheus.${DOMAIN}|" "$dir/.env"
+        sed -i "s|grafana\.microservices\.local|grafana.${DOMAIN}|" "$dir/.env"
+      fi
       success "Created $dir/.env"
     else
       warn "$dir/.env already exists – skipping."
