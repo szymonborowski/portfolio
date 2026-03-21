@@ -140,6 +140,9 @@ setup_env_files() {
   # infra
   if [ ! -f "infra/.env" ]; then
     cp infra/.env.example infra/.env
+    sed -i "s|traefik\.microservices\.local|traefik.${DOMAIN}|" infra/.env
+    sed -i "s|prometheus\.microservices\.local|prometheus.${DOMAIN}|" infra/.env
+    sed -i "s|grafana\.microservices\.local|grafana.${DOMAIN}|" infra/.env
     success "Created infra/.env"
   else
     warn "infra/.env already exists – skipping."
