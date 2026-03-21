@@ -107,6 +107,15 @@ check_requirements() {
 }
 
 # -----------------------------------------------------------------------------
+request_sudo() {
+  info "Requesting sudo privileges (needed for /etc/hosts)..."
+  if ! sudo -v; then
+    error "sudo is required to update /etc/hosts."
+  fi
+  success "sudo OK."
+}
+
+# -----------------------------------------------------------------------------
 clone_services() {
   info "Cloning microservice repositories..."
   cd "$ROOT_DIR"
@@ -249,6 +258,7 @@ main() {
   echo ""
 
   check_requirements
+  request_sudo
   clone_services
   setup_env_files
   generate_secrets
