@@ -61,16 +61,18 @@ After setup, start all services:
 
 ### Local Domains
 
+Default domain is `microservices.local`. Use `--domain <domain>` to override.
+
 | Service | URL |
 |---------|-----|
-| Frontend | `https://frontend.microservices.local` |
-| SSO | `https://sso.microservices.local` |
-| Admin | `https://admin.microservices.local` |
-| Blog API | `https://blog.microservices.local` |
-| Traefik Dashboard | `https://traefik.microservices.local` |
-| RabbitMQ | `https://rabbitmq.microservices.local` |
-| Grafana | `https://grafana.microservices.local` |
-| Prometheus | `https://prometheus.microservices.local` |
+| Frontend | `https://frontend.<domain>` |
+| SSO | `https://sso.<domain>` |
+| Admin | `https://admin.<domain>` |
+| Blog API | `https://blog.<domain>` |
+| Traefik Dashboard | `https://traefik.<domain>` |
+| RabbitMQ | `https://rabbitmq.<domain>` |
+| Grafana | `https://grafana.<domain>` |
+| Prometheus | `https://prometheus.<domain>` |
 
 ## Production (Docker Compose)
 
