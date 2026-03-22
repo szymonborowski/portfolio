@@ -36,6 +36,8 @@ Options:
                         (default: https://github.com/szymonborowski)
   --network <name>      External Docker network name
                         (default: web)
+  --purge               Stop all services and remove cloned directories
+                        (allows a clean reinstall)
   -h, --help            Show this help message and exit
 
 Requirements:
@@ -54,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --repo-base) REPO_BASE="$2";    shift 2 ;;
     --network)   NETWORK_NAME="$2"; shift 2 ;;
     --https)     REPO_BASE="https://github.com/szymonborowski"; shift ;;
+    --purge)     PURGE=true; shift ;;
     -h|--help)   usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -242,6 +245,28 @@ setup_hosts() {
 }
 
 # -----------------------------------------------------------------------------
+purge() {
+  warn "Purging local dev environment..."
+  cd "$ROOT_DIR"
+
+  if [ -f "$ROOT_DIR/dev.sh" ]; then
+    info "Stopping all services..."
+    bash "$ROOT_DIR/dev.sh" down 2>/dev/null || true
+  fi
+
+  for entry in "${SERVICES[@]}"; do
+    dir="${entry%%:*}"
+    if [ -d "$dir" ]; then
+      rm -rf "$dir"
+      success "Removed $dir/"
+    fi
+  done
+
+  success "Purge complete. Run ./install.sh to set up again."
+  exit 0
+}
+
+# -----------------------------------------------------------------------------
 create_networks() {
   info "Creating Docker networks..."
   docker network create "$NETWORK_NAME" 2>/dev/null && success "Created network: $NETWORK_NAME" || warn "Network $NETWORK_NAME already exists – skipping."
@@ -254,6 +279,8 @@ main() {
   echo "  Portfolio – local dev setup"
   echo "  ================================"
   echo ""
+
+  ${PURGE:-false} && purge
 
   check_requirements
   request_sudo
@@ -268,7 +295,7 @@ main() {
   success "Setup complete!"
   echo ""
   echo "  Next steps:"
-  echo "  1. Run: ./dev.sh up -d"
+  echo "  1. Run: ./dev.sh up -d --build"
   echo ""
 }
 
