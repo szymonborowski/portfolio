@@ -331,7 +331,7 @@ services:
       - frontend-internal
 
   frontend-db:
-    image: mysql:8
+    image: mysql:8.0
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${FRONTEND_DB_DATABASE}
@@ -432,7 +432,7 @@ services:
       - microservices
 
   sso-db:
-    image: mysql:8
+    image: mysql:8.0
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${SSO_DB_DATABASE}
@@ -539,7 +539,7 @@ services:
       - web
 
   admin-db:
-    image: mysql:8
+    image: mysql:8.0
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${ADMIN_DB_DATABASE}
@@ -643,7 +643,7 @@ services:
       - microservices
 
   users-db:
-    image: mysql:8
+    image: mysql:8.0
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${USERS_DB_DATABASE}
@@ -782,7 +782,7 @@ services:
       - microservices
 
   blog-db:
-    image: mysql:8
+    image: mysql:8.0
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${BLOG_DB_DATABASE}
@@ -911,7 +911,7 @@ services:
       - microservices
 
   analytics-db:
-    image: mysql:8
+    image: mysql:8.0
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${ANALYTICS_DB_DATABASE}
