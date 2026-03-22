@@ -144,11 +144,9 @@ setup_env_files() {
       cp "$dir/.env.example" "$dir/.env"
       sed -i "s/^UID=.*/UID=$(id -u)/" "$dir/.env"
       sed -i "s/^GID=.*/GID=$(id -g)/" "$dir/.env"
+      sed -i "s|\.microservices\.local|.${DOMAIN}|g" "$dir/.env"
       if [[ "$dir" == "infra" ]]; then
         sed -i "s|^DOMAIN=.*|DOMAIN=${DOMAIN}|" "$dir/.env"
-        sed -i "s|traefik\.microservices\.local|traefik.${DOMAIN}|" "$dir/.env"
-        sed -i "s|prometheus\.microservices\.local|prometheus.${DOMAIN}|" "$dir/.env"
-        sed -i "s|grafana\.microservices\.local|grafana.${DOMAIN}|" "$dir/.env"
         DOMAIN="$DOMAIN" envsubst < "$dir/dynamic/traefik_dynamic.yml.example" > "$dir/dynamic/traefik_dynamic.yml"
         success "Generated infra/dynamic/traefik_dynamic.yml"
       fi
