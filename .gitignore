@@ -5,6 +5,8 @@ blog/
 frontend/
 infra/
 sso/
+service-config/
+service-config-filament/
 users/
 
 # Environment files with secrets
