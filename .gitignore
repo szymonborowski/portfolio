@@ -20,7 +20,7 @@ users/
 *.code-workspace
 
 # AI assistants
-.claude/
+.claude*
 claude.md
 .mcp.json
 
@@ -39,3 +39,10 @@ COMMITS.md
 # Kubernetes scripts (not yet production-ready)
 scripts/k8s-deploy.sh
 scripts/k8s-seed.sh
+
+# Blog media (managed separately)
+media/
+backups/
+
+# ArgoCD application manifests
+argocd/

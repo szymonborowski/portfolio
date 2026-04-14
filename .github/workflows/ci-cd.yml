@@ -84,29 +84,62 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Update deployment manifest for ArgoCD
-        if: steps.dockerfile.outputs.found == 'true' && github.ref == 'refs/heads/master' && github.event_name == 'push'
+      - name: Install kustomize
+        if: steps.dockerfile.outputs.found == 'true' && github.event_name == 'push'
+        run: |
+          curl -sLo kustomize.tar.gz \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz"
+          tar -xzf kustomize.tar.gz
+          sudo mv kustomize /usr/local/bin/kustomize
+          kustomize version
+
+      - name: Update image tag for ArgoCD
+        if: steps.dockerfile.outputs.found == 'true' && github.event_name == 'push'
         env:
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          IMAGE: ${{ steps.meta.outputs.image }}
           IMAGE_TAG: ${{ steps.meta.outputs.sha_tag }}
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           set -e
+
+          # Each service lives in its own repo: szymonborowski/{service}_service
+          SERVICE_REPO="szymonborowski/${{ matrix.service }}_service"
+          OVERLAY_PATH="k8s/overlays/prod"
+
+          # Clone the service repo using PAT
+          git clone "https://x-access-token:${GH_PAT}@github.com/${SERVICE_REPO}.git" service-repo
+          cd service-repo
+
+          if [ ! -d "$OVERLAY_PATH" ]; then
+            echo "No overlay at ${OVERLAY_PATH} in ${SERVICE_REPO}; skipping"
+            exit 0
+          fi
+
           git config user.name "$GIT_AUTHOR_NAME"
           git config user.email "$GIT_AUTHOR_EMAIL"
-          DEPLOY_FILE="${{ matrix.service }}/k8s/deployment.yaml"
-          if [ -f "$DEPLOY_FILE" ]; then
-            sed -E -i "s#(image:\s*)ghcr.io[^/]*/[^ ]*#\1${IMAGE_TAG}#" "$DEPLOY_FILE" || true
-            if git diff --exit-code "$DEPLOY_FILE" > /dev/null 2>&1; then
-              echo "No changes in $DEPLOY_FILE, skipping commit"
-            else
-              git add "$DEPLOY_FILE"
-              git commit -m "chore(ci): update ${{ matrix.service }} image to ${IMAGE_TAG}"
-              git push
-            fi
-          else
-            echo "No deployment file at $DEPLOY_FILE; skipping manifest update"
+
+          cd "$OVERLAY_PATH"
+          kustomize edit set image "${IMAGE}=${IMAGE_TAG}"
+          cd "$GITHUB_WORKSPACE/service-repo"
+
+          if git diff --exit-code "${OVERLAY_PATH}/kustomization.yaml" > /dev/null 2>&1; then
+            echo "No image change, skipping commit"
+            exit 0
           fi
+
+          git add "${OVERLAY_PATH}/kustomization.yaml"
+          git commit -m "chore(cd): update image to ${IMAGE_TAG}"
+
+          # Retry push with rebase in case of concurrent runs
+          MAX_RETRIES=5
+          for i in $(seq 1 $MAX_RETRIES); do
+            git pull --rebase origin master && git push && break
+            echo "Push attempt $i failed, retrying in ${i}s..."
+            sleep $i
+            [ $i -eq $MAX_RETRIES ] && { echo "Failed to push after $MAX_RETRIES attempts"; exit 1; }
+          done
 
       - name: Notify (done)
         run: echo "✓ Finished build for ${{ matrix.service }} → ${{ steps.meta.outputs.sha_tag }}"
