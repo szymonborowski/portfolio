@@ -703,10 +703,16 @@ services:
       RABBITMQ_PORT: "5672"
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASS}
+      MEILISEARCH_HOST: http://blog-meilisearch:7700
+      MEILISEARCH_KEY: ${BLOG_MEILISEARCH_KEY}
+      SCOUT_DRIVER: meilisearch
+      SCOUT_QUEUE: "true"
     volumes:
       - blog_public:/var/www/html/public
     depends_on:
       blog-db:
+        condition: service_healthy
+      blog-meilisearch:
         condition: service_healthy
     expose:
       - "9000"
@@ -775,10 +781,16 @@ services:
       RABBITMQ_PORT: "5672"
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASS}
+      MEILISEARCH_HOST: http://blog-meilisearch:7700
+      MEILISEARCH_KEY: ${BLOG_MEILISEARCH_KEY}
+      SCOUT_DRIVER: meilisearch
+      SCOUT_QUEUE: "true"
     depends_on:
       blog-db:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      blog-meilisearch:
         condition: service_healthy
     logging: *default-logging
     deploy:
@@ -791,6 +803,31 @@ services:
     networks:
       - blog-internal
       - microservices
+
+  blog-meilisearch:
+    image: getmeili/meilisearch:v1.11
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${BLOG_MEILISEARCH_KEY}
+    volumes:
+      - blog_meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.50'
+        reservations:
+          memory: 64m
+    networks:
+      - blog-internal
 
   blog-db:
     image: mysql:8.0
@@ -992,5 +1029,6 @@ volumes:
   users_db_data:
   blog_public:
   blog_db_data:
+  blog_meilisearch_data:
   analytics_public:
   analytics_db_data:

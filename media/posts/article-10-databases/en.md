@@ -1,0 +1,138 @@
+---
+title: "Databases in the portfolio project — polyglot persistence in practice"
+date: 2026-04-14
+category: "Backend"
+tags: [MySQL, Redis, Meilisearch, Qdrant, RabbitMQ, databases, microservices, Laravel, RAG, search]
+locale: en
+---
+
+A modern microservices architecture rarely relies on a single data storage system. My portfolio project is an example of **polyglot persistence** — each task is delegated to a specialized tool. In this article I describe which technologies I chose, what role they play, and what the alternatives are.
+
+## MySQL 8.0 — relational database as the foundation
+
+MySQL is the core of every service. The architecture follows a **database-per-service** pattern — each microservice owns its own isolated database:
+
+| Service | Database | Stored data |
+|---|---|---|
+| `frontend` | `frontend` | contact form submissions |
+| `users` | `users` | accounts, OAuth 2.0 tokens, roles |
+| `sso` | `sso` | authorization sessions |
+| `blog` | `blog` | posts, categories, tags, comments, authors |
+| `analytics` | `analytics` | page views, daily statistics, likes |
+| `admin` | `admin` | admin panel |
+
+The blog is an example of a complex schema: posts with UUIDs, translations, status (`draft / published / archived`), soft deletes, and junction tables for `post ↔ tag` and `post ↔ category` relationships. Analytics stores raw views (`post_views`) and aggregated daily statistics (`post_daily_stats`), enabling fast trend queries without full table scans.
+
+### Integration effort
+
+Integration via Laravel Eloquent ORM is relatively low-cost — declarative migrations, models with relationships, and scopes are well understood. The bigger effort was designing the boundaries between services: databases share no tables, so cross-service queries are impossible. Data must be synchronized through events (RabbitMQ), and each service maintains its own denormalized copy of the data it needs.
+
+### Alternatives
+
+**PostgreSQL** — more mature, with better support for JSON, full-text search, and extensions. It would be the better technical choice for most use cases. I chose MySQL due to greater familiarity and a faster start. **SQLite** is fine for a single-service project or local development but does not scale horizontally and does not handle concurrent writes in production.
+
+---
+
+## Redis 7 — cache and sessions
+
+Redis serves two purposes for the `frontend` service:
+
+- **Session store** (`SESSION_DRIVER=redis`, database 0) — user sessions stored in memory with TTL and automatic expiry
+- **Cache store** (`CACHE_STORE=redis`, database 1) — caching views, database queries, API responses
+
+Splitting into two slots allows cache to be flushed independently without losing sessions.
+
+### Integration effort
+
+Laravel supports Redis out of the box — configuration is just a few lines in `.env`. In Kubernetes it runs as a `StatefulSet` with `1Gi` persistent storage, which protects data across pod restarts.
+
+### Alternatives
+
+**Memcached** — simpler, pure cache, but no support for complex data structures, pub/sub, or persistence. File-based sessions do not work in a multi-pod environment (Kubernetes) — Redis solves this centrally. Database sessions (`SESSION_DRIVER=database`) work but add an SQL query on every HTTP request; Redis offers orders-of-magnitude lower latency.
+
+---
+
+## Meilisearch v1.11 — full-text search
+
+The `blog` service indexes posts, categories, and tags through **Laravel Scout** with the Meilisearch driver. Each post in the index contains:
+
+- `title`, `excerpt`, `content` — full text
+- `categories`, `tags` — nested arrays for filtering
+- `published_at` — chronological sorting
+- `status` — filtering to published only
+
+The configuration includes typo tolerance, word-proximity ranking, and soft-delete handling via `shouldBeSearchable()`. Search returns results in milliseconds even on large datasets.
+
+### Integration effort
+
+Integrating Meilisearch with Laravel Scout is one of the simpler steps in the entire project — implement the `Searchable` trait, add a `toSearchableArray()` method, and configure the environment. More thought was required to understand ranking rules and decide which fields should be `filterable` vs `sortable` vs searchable-only.
+
+### Alternatives
+
+**Elasticsearch / OpenSearch** — the industry standard with enormous capabilities, but it requires the JVM, has a high memory footprint (at least 1–2 GB), and complex configuration. Overkill for a blog. **Algolia** is a SaaS with an excellent SDK and zero infrastructure, but it is paid above the free operation limit. **MySQL FULLTEXT** is available without additional services but lacks typo tolerance, typo-awareness, and relevance ranking.
+
+Meilisearch is the right choice here: open-source, lightweight, performs well on small instances, and offers a developer experience on par with Algolia.
+
+---
+
+## Qdrant v1.14.1 — vector database for AI
+
+This is the most technically advanced component of the project. Qdrant stores **vector embeddings** of blog posts generated by the `voyage-3` model (Voyage AI). The `portfolio_posts` collection enables **semantic search** — when a user asks a question in the chat, the system:
+
+1. Converts the question to an embedding (Voyage API)
+2. Queries Qdrant for the nearest vectors (cosine similarity)
+3. Passes the retrieved posts as context to the Claude API (Anthropic)
+4. The model generates a response based on the blog content
+
+This is the classic **RAG** (Retrieval-Augmented Generation) pattern. In Kubernetes, Qdrant runs as a `StatefulSet` with `2Gi` persistent storage.
+
+### Integration effort
+
+This integration required the most effort of all database components in the project:
+
+- Choosing an embedding model and understanding vector dimensions
+- Designing the collection schema (payload fields, indexes)
+- Pipeline: post → chunking → embedding → upsert to Qdrant
+- Synchronization on post updates
+- Integration with the Claude API as the LLM
+- Frontend chat implementation
+
+### Alternatives
+
+**pgvector** (PostgreSQL extension) — vectors embedded in an existing database, simpler operationally, but weaker approximate nearest-neighbour (ANN) algorithms at scale. **Pinecone** — SaaS, the easiest start, but paid and without control over your own data. **Weaviate / Chroma** — alternative vector databases; Chroma is popular for prototypes, Weaviate is more enterprise-oriented. Qdrant stands out for its performance, clean Rust-based API, and native support for payload filtering.
+
+---
+
+## RabbitMQ 3 — message queue
+
+RabbitMQ is the communication backbone between services. Instead of direct HTTP calls (which create tight coupling), services publish events asynchronously:
+
+- **Frontend** → publishes events (contact submissions, user actions)
+- **Blog** → consumes user events (`rabbitmq:consume-users`), publishes view events
+- **Analytics** → consumes view events (`rabbitmq:consume-views`), aggregates statistics
+
+This pattern enables independent scaling of services and resilience to temporary consumer unavailability.
+
+### Integration effort
+
+Configuring RabbitMQ is straightforward (Docker image, environment variables), but designing exchanges, routing keys, and idempotent consumers requires careful thought. Each consumer must handle duplicates and processing errors.
+
+### Alternatives
+
+**Apache Kafka** — log-style event streaming, excellent for high volumes and event sourcing, but significantly more complex to operate. **Redis Streams** — Redis is already in the project, which would avoid an extra service, but Redis Streams is less mature than RabbitMQ, and pub/sub does not guarantee message durability.
+
+---
+
+## Summary
+
+```
+MySQL 8.0     → transactional data (6 services)
+Redis 7       → sessions + cache (frontend)
+Meilisearch   → full-text search (blog)
+Qdrant        → embeddings + RAG AI chat (frontend)
+RabbitMQ 3    → async inter-service communication
+Prometheus    → time-series metrics
+Loki          → log aggregation
+```
+
+Every technology has a clearly defined responsibility. What could be simplified in a single-service project (e.g. MySQL FULLTEXT instead of Meilisearch) makes perfect sense in a microservices architecture — isolation, specialization, and independent scaling of each component.
