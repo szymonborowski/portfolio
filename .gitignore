@@ -44,5 +44,3 @@ scripts/k8s-seed.sh
 media/
 backups/
 
-# ArgoCD application manifests
-argocd/
